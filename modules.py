@@ -17,6 +17,13 @@ class ImageEncoder(nn.Module):
         self.model = timm.create_model(
             model_name, pretrained, num_classes=0, global_pool="avg"
         )
+        """
+        self.model = timm.create_model(
+            'vit_base_patch16_224.augreg2_in21k_ft_in1k',
+            pretrained=True,
+            num_classes=0,  # remove classifier nn.Linear
+        )
+        """
         for p in self.model.parameters():
             p.requires_grad = trainable
 
@@ -25,7 +32,7 @@ class ImageEncoder(nn.Module):
 
 
 class TextEncoder(nn.Module):
-    def __init__(self, model_name=CFG.text_encoder_model, pretrained=CFG.pretrained, trainable=CFG.trainable):
+    def __init__(self, model_name=CFG.text_encoder_model, pretrained=True, trainable=False):
         super().__init__()
         if pretrained:
             self.model = DistilBertModel.from_pretrained(model_name)

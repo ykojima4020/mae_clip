@@ -3,9 +3,11 @@ import gc
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+import pathlib
 
 import torch
 from torch import nn
+from torch.utils.tensorboard import SummaryWriter
 from transformers import DistilBertTokenizer
 
 import config as CFG
@@ -13,6 +15,7 @@ from dataset import CLIPDataset, get_transforms
 from CLIP import CLIPModel
 from utils import AvgMeter, get_lr
 
+from coco_captions_to_df import get_coco_captions_df, get_coco_captions_test_df
 
 def make_train_valid_dfs():
     dataframe = pd.read_csv(f"{CFG.captions_path}/captions.csv")
@@ -80,13 +83,21 @@ def valid_epoch(model, valid_loader):
 
 
 def main():
-    train_df, valid_df = make_train_valid_dfs()
+    # train_df, valid_df = make_train_valid_dfs()
+    train_df = get_coco_captions_df('/data/yuto/dataset/annotations/captions_train2014.json')
+    valid_df = get_coco_captions_df('/data/yuto/dataset/annotations/captions_val2014.json')
     tokenizer = DistilBertTokenizer.from_pretrained(CFG.text_tokenizer)
+    print("tokenizer created.")
     train_loader = build_loaders(train_df, tokenizer, mode="train")
     valid_loader = build_loaders(valid_df, tokenizer, mode="valid")
 
+    print(CFG.checkpoints)
+    save_dir = pathlib.Path(CFG.checkpoints)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    writer = SummaryWriter(CFG.logdir)
 
     model = CLIPModel().to(CFG.device)
+    print("CLIP created.")
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay
     )
@@ -106,9 +117,10 @@ def main():
         
         if valid_loss.avg < best_loss:
             best_loss = valid_loss.avg
-            torch.save(model.state_dict(), "best.pt")
+            checkpoint = save_dir / f"checkpoint_{epoch+1}.pth"
+            torch.save(model.state_dict(), checkpoint)
             print("Saved Best Model!")
-
+        writer.add_scalars('loss', {'train' : train_loss.avg, 'val' : valid_loss.avg}, global_step=epoch)
 
 if __name__ == "__main__":
     main()
