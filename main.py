@@ -1,9 +1,10 @@
 import os
-import gc
+import sys
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import pathlib
+import wandb
 
 import torch
 from torch import nn
@@ -83,9 +84,12 @@ def valid_epoch(model, valid_loader):
 
 
 def main():
+    # wandb_config = vars(CFG)
+    run = wandb.init(project="mae_clip", entity="ykojima") 
+
     # train_df, valid_df = make_train_valid_dfs()
-    train_df = get_coco_captions_df('/data/yuto/dataset/annotations/captions_train2014.json')
-    valid_df = get_coco_captions_df('/data/yuto/dataset/annotations/captions_val2014.json')
+    train_df = get_coco_captions_test_df(CFG.train_json)
+    valid_df = get_coco_captions_test_df(CFG.val_json)
     tokenizer = DistilBertTokenizer.from_pretrained(CFG.text_tokenizer)
     print("tokenizer created.")
     train_loader = build_loaders(train_df, tokenizer, mode="train")
@@ -94,7 +98,7 @@ def main():
     print(CFG.checkpoints)
     save_dir = pathlib.Path(CFG.checkpoints)
     save_dir.mkdir(parents=True, exist_ok=True)
-    writer = SummaryWriter(CFG.logdir)
+    # writer = SummaryWriter(CFG.logdir)
 
     model = CLIPModel().to(CFG.device)
     print("CLIP created.")
@@ -108,19 +112,25 @@ def main():
 
     best_loss = float('inf')
     for epoch in range(CFG.epochs):
+        stats = {'epoch': epoch}
         print(f"Epoch: {epoch + 1}")
         model.train()
         train_loss = train_epoch(model, train_loader, optimizer, lr_scheduler, step)
+        stats['train_loss'] = train_loss.avg
         model.eval()
         with torch.no_grad():
             valid_loss = valid_epoch(model, valid_loader)
-        
+            stats['val_loss'] = valid_loss.avg 
+
         if valid_loss.avg < best_loss:
             best_loss = valid_loss.avg
             checkpoint = save_dir / f"checkpoint_{epoch+1}.pth"
             torch.save(model.state_dict(), checkpoint)
             print("Saved Best Model!")
-        writer.add_scalars('loss', {'train' : train_loss.avg, 'val' : valid_loss.avg}, global_step=epoch)
+        # writer.add_scalars('loss', {'train' : train_loss.avg, 'val' : valid_loss.avg}, global_step=epoch)
+        wandb.log(stats)
+
+    run.finish()
 
 if __name__ == "__main__":
     main()

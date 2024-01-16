@@ -1,7 +1,12 @@
 import torch
 
 debug = True
-image_path = "/data/yuto/clip/OpenAI-CLIP/dataset/coco"
+
+# dataset
+image_path = "./dataset/coco"
+train_json = "/home/ykojima/dataset/coco/annotations/captions_train2014.json"
+val_json =  "/home/ykojima/dataset/coco/annotations/captions_val2014.json"
+
 captions_path = "C:/Moein/AI/Datasets/Flicker-8k"
 batch_size = 8
 num_workers = 0
