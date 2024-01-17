@@ -1,10 +1,11 @@
 import os
 import cv2
 import torch
-import albumentations as A
+from torchvision import transforms
+import timm
 
 import config as CFG
-
+from PIL import Image
 
 class CLIPDataset(torch.utils.data.Dataset):
     def __init__(self, image_filenames, captions, tokenizer, transforms):
@@ -27,10 +28,15 @@ class CLIPDataset(torch.utils.data.Dataset):
             for key, values in self.encoded_captions.items()
         }
 
-        image = cv2.imread(f"{CFG.image_path}/{self.image_filenames[idx]}")
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = self.transforms(image=image)['image']
-        item['image'] = torch.tensor(image).permute(2, 0, 1).float()
+        # image = cv2.imread(f"{CFG.image_path}/{self.image_filenames[idx]}")
+        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.open(f"{CFG.image_path}/{self.image_filenames[idx]}") 
+        if image.mode == 'L':
+            image = image.convert('RGB') # This is because there's images in a gray scale.
+        # image = self.transforms(image=image)['image']
+        image = self.transforms(image)
+        # item['image'] = torch.tensor(image).permute(2, 0, 1).float()
+        item['image'] = image
         item['caption'] = self.captions[idx]
 
         return item
@@ -39,22 +45,3 @@ class CLIPDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.captions)
 
-
-
-def get_transforms(mode="train"):
-    if mode == "train":
-        return A.Compose(
-            [
-                A.Resize(CFG.size, CFG.size, always_apply=True),
-                A.Normalize(max_pixel_value=255.0, always_apply=True),
-            ]
-        )
-    else:
-        return A.Compose(
-            [
-                A.Resize(CFG.size, CFG.size, always_apply=True),
-                A.Normalize(max_pixel_value=255.0, always_apply=True),
-            ]
-        )
-
-    
