@@ -12,8 +12,9 @@ from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from transformers import DistilBertTokenizer
 
+from dataset import CLIPDataset
+
 from factory import ViTCLIPFactory
-from dataset import CLIPDataset, get_transforms, get_vit_transforms
 from utils import AvgMeter, get_lr
 
 from coco_captions_to_df import get_coco_captions_df, get_coco_captions_test_df
@@ -75,6 +76,8 @@ def get_args_parser():
 
 
     # Dataset parameters
+    parser.add_argument('--image_path', default='./dataset/coco/',
+                        help='path to images')
     parser.add_argument('--train_json', default='/home/ykojima/dataset/coco/annotations/captions_train2014.json',
                         help='training annotation json')
     parser.add_argument('--val_json', default='/home/ykojima/dataset/coco/annotations/captions_val2014.json',
@@ -99,6 +102,7 @@ def get_args_parser():
 
 def build_loaders(args, dataframe, transforms, tokenizer, mode):
     dataset = CLIPDataset(
+        args.image_path,
         dataframe["image"].values,
         dataframe["caption"].values,
         tokenizer=tokenizer,

@@ -4,22 +4,22 @@ import torch
 from torchvision import transforms
 import timm
 
-import config as CFG
 from PIL import Image
 
 class CLIPDataset(torch.utils.data.Dataset):
-    def __init__(self, image_filenames, captions, tokenizer, transforms):
+    def __init__(self, image_path, image_filenames, captions, tokenizer, transforms):
         """
         image_filenames and cpations must have the same length; so, if there are
         multiple captions for each image, the image_filenames must have repetitive
         file names 
         """
 
+        self._image_path = image_path 
         self.image_filenames = image_filenames
         self.captions = list(captions)
+        max_length = 200 
         self.encoded_captions = tokenizer(
-            list(captions), padding=True, truncation=True, max_length=CFG.max_length
-        )
+            list(captions), padding=True, truncation=True, max_length=max_length)
         self.transforms = transforms
 
     def __getitem__(self, idx):
@@ -30,7 +30,7 @@ class CLIPDataset(torch.utils.data.Dataset):
 
         # image = cv2.imread(f"{CFG.image_path}/{self.image_filenames[idx]}")
         # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = Image.open(f"{CFG.image_path}/{self.image_filenames[idx]}") 
+        image = Image.open(f"{self._image_path}/{self.image_filenames[idx]}") 
         if image.mode == 'L':
             image = image.convert('RGB') # This is because there's images in a gray scale.
         # image = self.transforms(image=image)['image']

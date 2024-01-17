@@ -2,8 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-import config as CFG
-from modules import ImageEncoder, ViTImageEncoder, TextEncoder, ProjectionHead
+from model.modules import ImageEncoder, ViTImageEncoder, TextEncoder, ProjectionHead
 
 class CLIPModel(nn.Module):
     def __init__(self, image_encoder, text_encoder, image_projection, text_projection, temperature):

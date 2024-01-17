@@ -1,5 +1,5 @@
-from CLIP import CLIPModel
-from modules import ImageEncoder, ViTImageEncoder, TextEncoder, ProjectionHead
+from model.CLIP import CLIPModel
+from model.modules import ImageEncoder, ViTImageEncoder, TextEncoder, ProjectionHead
 
 class Factory:
     def __init__(self, cfg):
