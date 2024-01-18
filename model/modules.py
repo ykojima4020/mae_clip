@@ -64,7 +64,6 @@ class ViTImageEncoder(nn.Module):
         else:
             return timm.data.create_transform(**data_config, is_training=False)
 
-
 class OriginalViTImageEncoder(nn.Module):
     """
     Encode images to a fixed size vector
@@ -90,9 +89,6 @@ class OriginalViTImageEncoder(nn.Module):
             return timm.data.create_transform(**data_config, is_training=True)
         else:
             return timm.data.create_transform(**data_config, is_training=False)
-
-
-
 
 class TextEncoder(nn.Module):
     def __init__(self, model_name, pretrained=True, trainable=False):

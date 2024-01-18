@@ -1,5 +1,7 @@
-from model.CLIP import CLIPModel
+from model.clip import CLIP
 from model.modules import ImageEncoder, ViTImageEncoder, OriginalViTImageEncoder, TextEncoder, ProjectionHead
+
+from model.mae_clip import MAECLIP
 
 class Factory:
     def __init__(self, cfg):
@@ -19,7 +21,7 @@ class ViTCLIPFactory(Factory):
         image_projection = ProjectionHead(embedding_dim=self._cfg.image_embedding, projection_dim=self._cfg.projection_dim, dropout=self._cfg.dropout)
         text_projection = ProjectionHead(embedding_dim=self._cfg.text_embedding, projection_dim=self._cfg.projection_dim, dropout=self._cfg.dropout)
 
-        return CLIPModel(image_encoder, text_encoder, image_projection, text_projection, self._cfg.temperature)
+        return CLIP(image_encoder, text_encoder, image_projection, text_projection, self._cfg.temperature)
 
 class OriginalViTCLIPFactory(Factory):
 
@@ -32,5 +34,13 @@ class OriginalViTCLIPFactory(Factory):
         image_projection = ProjectionHead(embedding_dim=self._cfg.image_embedding, projection_dim=self._cfg.projection_dim, dropout=self._cfg.dropout)
         text_projection = ProjectionHead(embedding_dim=self._cfg.text_embedding, projection_dim=self._cfg.projection_dim, dropout=self._cfg.dropout)
 
-        return CLIPModel(image_encoder, text_encoder, image_projection, text_projection, self._cfg.temperature)
+        return CLIP(image_encoder, text_encoder, image_projection, text_projection, self._cfg.temperature)
+
+class MAECLIPFactory(Factory):
+
+    def __init__(self, cfg):
+        self._cfg = cfg
+
+    def create(self):
+        return MAECLIP(self._cfg)
 
