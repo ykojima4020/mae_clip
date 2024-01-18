@@ -1,5 +1,5 @@
 from model.CLIP import CLIPModel
-from model.modules import ImageEncoder, ViTImageEncoder, TextEncoder, ProjectionHead
+from model.modules import ImageEncoder, ViTImageEncoder, OriginalViTImageEncoder, TextEncoder, ProjectionHead
 
 class Factory:
     def __init__(self, cfg):
@@ -21,4 +21,16 @@ class ViTCLIPFactory(Factory):
 
         return CLIPModel(image_encoder, text_encoder, image_projection, text_projection, self._cfg.temperature)
 
+class OriginalViTCLIPFactory(Factory):
+
+    def __init__(self, cfg):
+        self._cfg = cfg
+
+    def create(self):
+        image_encoder = OriginalViTImageEncoder(self._cfg.image_encoder_name, self._cfg.image_encoder_pretrained, self._cfg.image_encoder_trainable, self._cfg)
+        text_encoder = TextEncoder(self._cfg.text_encoder_name, pretrained=True, trainable=False)
+        image_projection = ProjectionHead(embedding_dim=self._cfg.image_embedding, projection_dim=self._cfg.projection_dim, dropout=self._cfg.dropout)
+        text_projection = ProjectionHead(embedding_dim=self._cfg.text_embedding, projection_dim=self._cfg.projection_dim, dropout=self._cfg.dropout)
+
+        return CLIPModel(image_encoder, text_encoder, image_projection, text_projection, self._cfg.temperature)
 

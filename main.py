@@ -14,7 +14,7 @@ from transformers import DistilBertTokenizer
 
 from dataset import CLIPDataset
 
-from factory import ViTCLIPFactory
+from factory import ViTCLIPFactory, OriginalViTCLIPFactory
 from utils import AvgMeter, get_lr
 
 from coco_captions_to_df import get_coco_captions_df, get_coco_captions_test_df
@@ -49,8 +49,8 @@ def get_args_parser():
     parser.add_argument('--break_after_epoch', type=int, metavar='N', 
                         help='break training after X epochs, to tune hyperparams and avoid messing with training schedule.')
 
-    parser.add_argument('--patience', type=int, default=2)
-    parser.add_argument('--factor', type=float, default=0.5)
+    parser.add_argument('--patience', type=int, default=1)
+    parser.add_argument('--factor', type=float, default=0.8)
     
 
     # Tokenizer parameters
@@ -68,7 +68,7 @@ def get_args_parser():
 
     # Projection parameters
     parser.add_argument('--text_embedding', type=int, default=768)
-    parser.add_argument('--image_embedding', type=int, default=768)
+    parser.add_argument('--image_embedding', type=int, default=512)
     parser.add_argument('--projection_dim', type=int, default=256)
     parser.add_argument('--dropout', type=float, default=0.1)
 
@@ -114,7 +114,7 @@ def build_loaders(args, dataframe, transforms, tokenizer, mode):
     return dataloader
 
 
-def train_epoch(model, train_loader, optimizer, lr_scheduler, step):
+def train_epoch(model, train_loader, optimizer):
     loss_meter = AvgMeter()
     tqdm_object = tqdm(train_loader, total=len(train_loader))
     for batch in tqdm_object:
@@ -123,14 +123,13 @@ def train_epoch(model, train_loader, optimizer, lr_scheduler, step):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        if step == "batch":
-            lr_scheduler.step()
 
         count = batch["image"].size(0)
         loss_meter.update(loss.item(), count)
 
         tqdm_object.set_postfix(train_loss=loss_meter.avg, lr=get_lr(optimizer))
-    return loss_meter
+    lr = optimizer.param_groups[0]["lr"]
+    return loss_meter, lr
 
 
 def valid_epoch(model, valid_loader):
@@ -153,14 +152,21 @@ def main(args):
     device = torch.device(args.device)
     output_dir = pathlib.Path(args.output_dir)
 
-    # wandb_config = vars(args)
-    # run = wandb.init(project="mae_clip", entity="ykojima", config=wandb_config) 
+    if args.lr is None:  # only base_lr is specified
+        args.lr = args.blr * args.batch_size / 256 # 1e-3 * 64 / 256 = 0.00025
 
-    train_df = get_coco_captions_test_df(args.train_json)
-    valid_df = get_coco_captions_test_df(args.val_json)
+    wandb_config = vars(args)
+    run = wandb.init(project="mae_clip", entity="ykojima", config=wandb_config) 
+
+    # train_df = get_coco_captions_test_df(args.train_json) # for test data
+    # valid_df = get_coco_captions_test_df(args.val_json)   # for test data
+    train_df = get_coco_captions_df(args.train_json)
+    valid_df = get_coco_captions_df(args.val_json)
+
 
     tokenizer = DistilBertTokenizer.from_pretrained(args.text_tokenizer)
-    factory = ViTCLIPFactory(args)
+    # factory = ViTCLIPFactory(args)
+    factory = OriginalViTCLIPFactory(args)
     model = factory.create().to(device)
 
     transforms = model.get_transforms('train')
@@ -168,29 +174,19 @@ def main(args):
     transforms = model.get_transforms('valid')
     valid_loader = build_loaders(args, valid_df, transforms, tokenizer, mode="valid")
 
-    # save_dir = pathlib.Path(CFG.checkpoints)
-    # save_dir.mkdir(parents=True, exist_ok=True)
-    # writer = SummaryWriter(CFG.logdir)
-
-    factory = ViTCLIPFactory(args)
-    model = factory.create().to(device)
-
-    if args.lr is None:  # only base_lr is specified
-        args.lr = args.blr * args.batch_size / 256 # 1e-3 * 64 / 256 = 0.00025
-
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=args.patience, factor=args.factor)
-    step = "epoch"
 
     best_loss = float('inf')
     for epoch in range(args.epochs):
         stats = {'epoch': epoch}
         print(f"Epoch: {epoch + 1}")
         model.train()
-        train_loss = train_epoch(model, train_loader, optimizer, lr_scheduler, step)
+        train_loss, lr= train_epoch(model, train_loader, optimizer)
         stats['train_loss'] = train_loss.avg
+        stats['lr'] = lr
         model.eval()
         with torch.no_grad():
             valid_loss = valid_epoch(model, valid_loader)
@@ -201,8 +197,8 @@ def main(args):
             checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
             torch.save(model.state_dict(), checkpoint)
             print("Saved Best Model!")
-        # writer.add_scalars('loss', {'train' : train_loss.avg, 'val' : valid_loss.avg}, global_step=epoch)
-        # wandb.log(stats)
+        lr_scheduler.step(valid_loss.avg)
+        wandb.log(stats)
 
     run.finish()
 

@@ -16,6 +16,7 @@ class CLIPModel(nn.Module):
     def image_encode(self, image):
         # Getting Image and Text Features
         image_features = self._image_encoder(image)
+        # print("image_features: ", image_features.shape)
         image_embeddings = self._image_projection(image_features)
         return image_embeddings 
 
