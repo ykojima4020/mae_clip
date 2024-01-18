@@ -2,9 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from model.modules import ImageEncoder, ViTImageEncoder, TextEncoder, ProjectionHead
-
-class CLIPModel(nn.Module):
+class CLIP(nn.Module):
     def __init__(self, image_encoder, text_encoder, image_projection, text_projection, temperature):
         super().__init__()
         self._image_encoder = image_encoder
@@ -15,7 +13,7 @@ class CLIPModel(nn.Module):
 
     def image_encode(self, image):
         # Getting Image and Text Features
-        image_features = self._image_encoder(image)
+        image_features = self._image_encoder(image)[0][0, :, :]
         # print("image_features: ", image_features.shape)
         image_embeddings = self._image_projection(image_features)
         return image_embeddings 
@@ -67,6 +65,5 @@ if __name__ == '__main__':
         'attention_mask': attention_mask
     }
 
-    CLIP = CLIPModel()
-    loss = CLIP(batch)
-    print("")
+    # clip = CLIP()
+    # loss = clip(batch)

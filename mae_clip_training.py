@@ -14,11 +14,11 @@ from transformers import DistilBertTokenizer
 
 from dataset import CLIPDataset
 
-from factory import ViTCLIPFactory, OriginalViTCLIPFactory
+from factory import MAECLIPFactory
 
 from misc.utils import AvgMeter, get_lr
 from misc.coco_captions_to_df import get_coco_captions_df, get_coco_captions_test_df
-from misc.transforms import get_original_vit_image_encoer_transforms
+from misc.transforms import get_original_vit_image_encoder_transforms
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
@@ -35,6 +35,8 @@ def get_args_parser():
     # Shared training
     parser.add_argument('--mask_ratio', default=0.75, type=float,
                         help='Masking ratio (percentage of removed patches).')
+    parser.add_argument('--alpha', default=2, type=float,
+                        help='weight of mae reconstruction loss')
 
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
@@ -62,6 +64,9 @@ def get_args_parser():
     parser.add_argument('--text_encoder_name', default='distilbert-base-uncased')
     parser.add_argument('--text_encoder_pretrained', action='store_true')
     parser.add_argument('--text_encoder_trainable', action='store_true')
+
+    parser.add_argument('--image_size', type=int, default=224)
+    parser.add_argument('--patch_size', type=int, default=14)
 
     parser.add_argument('--image_encoder_name', default='vit_base_patch16_224.augreg2_in21k_ft_in1k')
     parser.add_argument('--image_encoder_pretrained', action='store_true')
@@ -117,35 +122,54 @@ def build_loaders(args, dataframe, transforms, tokenizer, mode):
 
 def train_epoch(model, train_loader, optimizer):
     loss_meter = AvgMeter()
+    clip_loss_meter = AvgMeter()
+    mae_loss_meter = AvgMeter()
     tqdm_object = tqdm(train_loader, total=len(train_loader))
     for batch in tqdm_object:
         batch = {k: v.to(device) for k, v in batch.items() if k != "caption"}
-        loss = model(batch)
+        loss, clip_loss, mae_loss, _ = model(batch)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         count = batch["image"].size(0)
         loss_meter.update(loss.item(), count)
+        clip_loss_meter.update(clip_loss.item(), count)
+        mae_loss_meter.update(mae_loss.item(), count)
 
         tqdm_object.set_postfix(train_loss=loss_meter.avg, lr=get_lr(optimizer))
     lr = optimizer.param_groups[0]["lr"]
-    return loss_meter, lr
+    stats = {'train': {'loss': loss_meter.avg,
+                       'clip_loss': clip_loss_meter.avg,
+                       'mae_loss': mae_loss_meter.avg},
+             'lr': lr}
+    return stats
 
 
 def valid_epoch(model, valid_loader):
     loss_meter = AvgMeter()
-
+    clip_loss_meter = AvgMeter()
+    mae_loss_meter = AvgMeter()
+ 
     tqdm_object = tqdm(valid_loader, total=len(valid_loader))
     for batch in tqdm_object:
         batch = {k: v.to(device) for k, v in batch.items() if k != "caption"}
-        loss = model(batch)
 
+        loss, clip_loss, mae_loss, reconstructed_img = model(batch)
         count = batch["image"].size(0)
         loss_meter.update(loss.item(), count)
+        clip_loss_meter.update(clip_loss.item(), count)
+        mae_loss_meter.update(mae_loss.item(), count)
 
         tqdm_object.set_postfix(valid_loss=loss_meter.avg)
-    return loss_meter
+    columns = ['original_image', 'reconstructed_image']
+    table = wandb.Table(columns=columns)
+    for sample, reconstruct in zip(batch['image'], reconstructed_img):
+        table.add_data(wandb.Image(sample), wandb.Image(reconstruct))
+    stats = {'valid': {'loss': loss_meter.avg,
+                       'clip_loss': clip_loss_meter.avg,
+                       'mae_loss': mae_loss_meter.avg}}
+    return stats, table
 
 
 def main(args):
@@ -166,13 +190,12 @@ def main(args):
 
 
     tokenizer = DistilBertTokenizer.from_pretrained(args.text_tokenizer)
-    # factory = ViTCLIPFactory(args)
-    factory = OriginalViTCLIPFactory(args)
+    factory = MAECLIPFactory(args)
     model = factory.create().to(device)
 
-    transforms = get_original_vit_image_encoer_transforms('train')
+    transforms = get_original_vit_image_encoder_transforms('train')
     train_loader = build_loaders(args, train_df, transforms, tokenizer, mode="train")
-    transforms = get_original_vit_image_encoer_transforms('valid')
+    transforms = get_original_vit_image_encoder_transforms('valid')
     valid_loader = build_loaders(args, valid_df, transforms, tokenizer, mode="valid")
 
     optimizer = torch.optim.AdamW(
@@ -185,21 +208,21 @@ def main(args):
         stats = {'epoch': epoch}
         print(f"Epoch: {epoch + 1}")
         model.train()
-        train_loss, lr= train_epoch(model, train_loader, optimizer)
-        stats['train_loss'] = train_loss.avg
-        stats['lr'] = lr
+        train_stats = train_epoch(model, train_loader, optimizer)
+        stats = stats | train_stats
         model.eval()
         with torch.no_grad():
-            valid_loss = valid_epoch(model, valid_loader)
-            stats['val_loss'] = valid_loss.avg 
+            valid_stats, table = valid_epoch(model, valid_loader)
+            stats = stats | valid_stats
 
-        if valid_loss.avg < best_loss:
-            best_loss = valid_loss.avg
+        if stats['valid']['loss'] < best_loss:
+            best_loss = stats['valid']['loss']
             checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
             torch.save(model.state_dict(), checkpoint)
             print("Saved Best Model!")
-        lr_scheduler.step(valid_loss.avg)
+        lr_scheduler.step(stats['valid']['loss'])
         wandb.log(stats)
+        wandb.log({'image': table})
 
     run.finish()
 
