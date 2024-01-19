@@ -64,32 +64,6 @@ class ViTImageEncoder(nn.Module):
         else:
             return timm.data.create_transform(**data_config, is_training=False)
 
-class OriginalViTImageEncoder(nn.Module):
-    """
-    Encode images to a fixed size vector
-    """
-    def __init__(self, model_name, pretrained, trainable, args):
-        super().__init__()
-        image_size = 224
-        patch_size = 14
-        emb_dim = args.image_embedding # 512
-        encoder_layer = 12
-        encoder_head = 4 
-        mask_ratio = 0
-        self.model = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
-
-    def forward(self, x):
-        features, backward_indexes = self.model(x) # features.shape is torch.Size([257, B, 192])
-        return features[0, :, :]
-
-    def get_transforms(self, mode):
-        data_config = timm.data.resolve_model_data_config(self.model)
-
-        if mode == "train":
-            return timm.data.create_transform(**data_config, is_training=True)
-        else:
-            return timm.data.create_transform(**data_config, is_training=False)
-
 class TextEncoder(nn.Module):
     def __init__(self, model_name, pretrained=True, trainable=False):
         super().__init__()

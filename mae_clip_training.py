@@ -19,6 +19,7 @@ from factory import MAECLIPFactory
 from misc.utils import AvgMeter, get_lr
 from misc.coco_captions_to_df import get_coco_captions_df, get_coco_captions_test_df
 from misc.transforms import get_original_vit_image_encoder_transforms
+from misc.saver import save_checkpoint
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
@@ -82,10 +83,12 @@ def get_args_parser():
 
 
     # Dataset parameters
-    parser.add_argument('--image_path', default='./dataset/coco/',
-                        help='path to images')
+    parser.add_argument('--train_image_path', default='./dataset/coco/',
+                        help='path to the training images')
     parser.add_argument('--train_json', default='/home/ykojima/dataset/coco/annotations/captions_train2014.json',
                         help='training annotation json')
+    parser.add_argument('--val_image_path', default='./dataset/coco/',
+                        help='path to the validation images')
     parser.add_argument('--val_json', default='/home/ykojima/dataset/coco/annotations/captions_val2014.json',
                         help='validation annotation json')
     parser.add_argument('--output_dir', default='./output_dir',
@@ -106,9 +109,9 @@ def get_args_parser():
     return parser
 
 
-def build_loaders(args, dataframe, transforms, tokenizer, mode):
+def build_loaders(args, image_path, dataframe, transforms, tokenizer, mode):
     dataset = CLIPDataset(
-        args.image_path,
+        image_path,
         dataframe["image"].values,
         dataframe["caption"].values,
         tokenizer=tokenizer,
@@ -194,9 +197,9 @@ def main(args):
     model = factory.create().to(device)
 
     transforms = get_original_vit_image_encoder_transforms('train')
-    train_loader = build_loaders(args, train_df, transforms, tokenizer, mode="train")
+    train_loader = build_loaders(args, args.train_image_path, train_df, transforms, tokenizer, mode="train")
     transforms = get_original_vit_image_encoder_transforms('valid')
-    valid_loader = build_loaders(args, valid_df, transforms, tokenizer, mode="valid")
+    valid_loader = build_loaders(args, args.val_image_path, valid_df, transforms, tokenizer, mode="valid")
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -218,7 +221,7 @@ def main(args):
         if stats['valid']['loss'] < best_loss:
             best_loss = stats['valid']['loss']
             checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
-            torch.save(model.state_dict(), checkpoint)
+            save_checkpoint(checkpoint, model.image_encoder, epoch)
             print("Saved Best Model!")
         lr_scheduler.step(stats['valid']['loss'])
         wandb.log(stats)

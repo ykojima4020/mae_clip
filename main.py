@@ -18,7 +18,7 @@ from factory import ViTCLIPFactory, OriginalViTCLIPFactory
 
 from misc.utils import AvgMeter, get_lr
 from misc.coco_captions_to_df import get_coco_captions_df, get_coco_captions_test_df
-from misc.transforms import get_original_vit_image_encoer_transforms
+from misc.transforms import get_original_vit_image_encoder_transforms
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
@@ -170,9 +170,9 @@ def main(args):
     factory = OriginalViTCLIPFactory(args)
     model = factory.create().to(device)
 
-    transforms = get_original_vit_image_encoer_transforms('train')
+    transforms = get_original_vit_image_encoder_transforms('train')
     train_loader = build_loaders(args, train_df, transforms, tokenizer, mode="train")
-    transforms = get_original_vit_image_encoer_transforms('valid')
+    transforms = get_original_vit_image_encoder_transforms('valid')
     valid_loader = build_loaders(args, valid_df, transforms, tokenizer, mode="valid")
 
     optimizer = torch.optim.AdamW(
