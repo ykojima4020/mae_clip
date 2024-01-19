@@ -1,4 +1,6 @@
 *.pyc
 __pycache__
 output/
+tmp/
 .ipynb_checkpoints/
+wandb/

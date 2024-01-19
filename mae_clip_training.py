@@ -1,30 +1,25 @@
 import os
 import sys
-import numpy as np
-import pandas as pd
 from tqdm import tqdm
 import pathlib
 import wandb
 import argparse
 
 import torch
-from torch import nn
-from torch.utils.tensorboard import SummaryWriter
 from transformers import DistilBertTokenizer
 
-from dataset import CLIPDataset
-
 from factory import MAECLIPFactory
-
+from data.dataloader_builder import CLIPDataLoaderBuilder
+from trainer.trainer import SimpleTrainer
+from trainer.validater import SimpleValidater
 from misc.utils import AvgMeter, get_lr
-from misc.coco_captions_to_df import get_coco_captions_df, get_coco_captions_test_df
-from misc.transforms import get_original_vit_image_encoder_transforms
 from misc.saver import save_checkpoint
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
     parser.add_argument('--save_ckpt_freq', default=20, type=int)
     parser.add_argument('--print_freq', default=50, type=int)
+    parser.add_argument('--test', action='store_true')
 
     parser.add_argument('--num_workers', default=4, type=int, help='number of processes loading data')
     parser.add_argument('--batch_size', default=64, type=int,
@@ -91,7 +86,7 @@ def get_args_parser():
                         help='path to the validation images')
     parser.add_argument('--val_json', default='/home/ykojima/dataset/coco/annotations/captions_val2014.json',
                         help='validation annotation json')
-    parser.add_argument('--output_dir', default='./output_dir',
+    parser.add_argument('--output_dir', default='./tmp',
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default='./output_dir',
                         help='path where to tensorboard log')
@@ -109,72 +104,6 @@ def get_args_parser():
     return parser
 
 
-def build_loaders(args, image_path, dataframe, transforms, tokenizer, mode):
-    dataset = CLIPDataset(
-        image_path,
-        dataframe["image"].values,
-        dataframe["caption"].values,
-        tokenizer=tokenizer,
-        transforms=transforms,
-    )
-    dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.batch_size, num_workers=args.num_workers,
-        shuffle=True if mode == "train" else False)
-    return dataloader
-
-
-def train_epoch(model, train_loader, optimizer):
-    loss_meter = AvgMeter()
-    clip_loss_meter = AvgMeter()
-    mae_loss_meter = AvgMeter()
-    tqdm_object = tqdm(train_loader, total=len(train_loader))
-    for batch in tqdm_object:
-        batch = {k: v.to(device) for k, v in batch.items() if k != "caption"}
-        loss, clip_loss, mae_loss, _ = model(batch)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        count = batch["image"].size(0)
-        loss_meter.update(loss.item(), count)
-        clip_loss_meter.update(clip_loss.item(), count)
-        mae_loss_meter.update(mae_loss.item(), count)
-
-        tqdm_object.set_postfix(train_loss=loss_meter.avg, lr=get_lr(optimizer))
-    lr = optimizer.param_groups[0]["lr"]
-    stats = {'train': {'loss': loss_meter.avg,
-                       'clip_loss': clip_loss_meter.avg,
-                       'mae_loss': mae_loss_meter.avg},
-             'lr': lr}
-    return stats
-
-
-def valid_epoch(model, valid_loader):
-    loss_meter = AvgMeter()
-    clip_loss_meter = AvgMeter()
-    mae_loss_meter = AvgMeter()
- 
-    tqdm_object = tqdm(valid_loader, total=len(valid_loader))
-    for batch in tqdm_object:
-        batch = {k: v.to(device) for k, v in batch.items() if k != "caption"}
-
-        loss, clip_loss, mae_loss, reconstructed_img = model(batch)
-        count = batch["image"].size(0)
-        loss_meter.update(loss.item(), count)
-        clip_loss_meter.update(clip_loss.item(), count)
-        mae_loss_meter.update(mae_loss.item(), count)
-
-        tqdm_object.set_postfix(valid_loss=loss_meter.avg)
-    columns = ['original_image', 'reconstructed_image']
-    table = wandb.Table(columns=columns)
-    for sample, reconstruct in zip(batch['image'], reconstructed_img):
-        table.add_data(wandb.Image(sample), wandb.Image(reconstruct))
-    stats = {'valid': {'loss': loss_meter.avg,
-                       'clip_loss': clip_loss_meter.avg,
-                       'mae_loss': mae_loss_meter.avg}}
-    return stats, table
-
-
 def main(args):
 
     device = torch.device(args.device)
@@ -186,36 +115,35 @@ def main(args):
     wandb_config = vars(args)
     run = wandb.init(project="mae_clip", entity="ykojima", config=wandb_config) 
 
-    # train_df = get_coco_captions_test_df(args.train_json) # for test data
-    # valid_df = get_coco_captions_test_df(args.val_json)   # for test data
-    train_df = get_coco_captions_df(args.train_json)
-    valid_df = get_coco_captions_df(args.val_json)
-
-
     tokenizer = DistilBertTokenizer.from_pretrained(args.text_tokenizer)
     factory = MAECLIPFactory(args)
     model = factory.create().to(device)
 
-    transforms = get_original_vit_image_encoder_transforms('train')
-    train_loader = build_loaders(args, args.train_image_path, train_df, transforms, tokenizer, mode="train")
-    transforms = get_original_vit_image_encoder_transforms('valid')
-    valid_loader = build_loaders(args, args.val_image_path, valid_df, transforms, tokenizer, mode="valid")
+    dataloader_builder = CLIPDataLoaderBuilder(tokenizer, args.batch_size, args.num_workers)
+    train_loader = dataloader_builder(args.train_image_path,
+                                      args.train_json, 'train', test=args.test)
+    val_loader = dataloader_builder(args.val_image_path,
+                                      args.val_json, 'val', test=args.test)
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=args.patience, factor=args.factor)
 
+    trainer = SimpleTrainer(train_loader, optimizer, device)
+    validater = SimpleValidater(train_loader, optimizer, device)
+
     best_loss = float('inf')
     for epoch in range(args.epochs):
         stats = {'epoch': epoch}
         print(f"Epoch: {epoch + 1}")
         model.train()
-        train_stats = train_epoch(model, train_loader, optimizer)
+        train_stats = trainer(model)
         stats = stats | train_stats
         model.eval()
         with torch.no_grad():
-            valid_stats, table = valid_epoch(model, valid_loader)
+            # valid_stats, table = valid_epoch(model, val_loader)
+            valid_stats, table = validater(model)
             stats = stats | valid_stats
 
         if stats['valid']['loss'] < best_loss:
