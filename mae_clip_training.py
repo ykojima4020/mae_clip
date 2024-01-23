@@ -149,7 +149,7 @@ def main(args):
         if stats['valid']['loss'] < best_loss:
             best_loss = stats['valid']['loss']
             checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
-            save_checkpoint(checkpoint, model.image_encoder, epoch)
+            save_checkpoint(checkpoint, model, epoch)
             print("Saved Best Model!")
         lr_scheduler.step(stats['valid']['loss'])
         wandb.log(stats)
