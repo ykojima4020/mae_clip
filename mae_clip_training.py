@@ -20,6 +20,7 @@ def get_args_parser():
     parser.add_argument('--save_ckpt_freq', default=20, type=int)
     parser.add_argument('--print_freq', default=50, type=int)
     parser.add_argument('--test', action='store_true')
+    parser.add_argument('--wandb', action='store_true')
 
     parser.add_argument('--num_workers', default=4, type=int, help='number of processes loading data')
     parser.add_argument('--batch_size', default=64, type=int,
@@ -112,8 +113,9 @@ def main(args):
     if args.lr is None:  # only base_lr is specified
         args.lr = args.blr * args.batch_size / 256 # 1e-3 * 64 / 256 = 0.00025
 
-    wandb_config = vars(args)
-    run = wandb.init(project="mae_clip", entity="ykojima", config=wandb_config) 
+    if args.wandb:
+        wandb_config = vars(args)
+        run = wandb.init(project="mae_clip", entity="ykojima", config=wandb_config) 
 
     tokenizer = DistilBertTokenizer.from_pretrained(args.text_tokenizer)
     factory = MAECLIPFactory(args)
@@ -152,10 +154,12 @@ def main(args):
             save_checkpoint(checkpoint, model, epoch)
             print("Saved Best Model!")
         lr_scheduler.step(stats['valid']['loss'])
-        wandb.log(stats)
-        wandb.log({'image': table})
+        if args.wandb:
+            wandb.log(stats)
+            wandb.log({'image': table})
 
-    run.finish()
+    if args.wandb:
+        run.finish()
 
 if __name__ == "__main__":
     args = get_args_parser()
