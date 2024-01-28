@@ -11,30 +11,30 @@ class MAECLIP(nn.Module):
         super().__init__()
         
         self._cfg = cfg
-        self._mask_ratio = cfg.mask_ratio
+        self._mask_ratio = cfg.mae.mask_ratio
 
-        self._image_size = cfg.image_size
-        self._patch_size = cfg.patch_size
-        self._emb_dim = cfg.image_embedding
+        self._image_size = cfg.image.encoder.size
+        self._patch_size = cfg.image.encoder.patch_size
+        self._emb_dim = cfg.image.encoder.embeddings
 
         self._encoder_layer = 12 
         self._encoder_head = 4 
         self._decoder_layer = 4 
         self._decoder_head = 4  
 
-        self._alpha = cfg.alpha
+        self._alpha = cfg.loss.alpha
 
         self.image_encoder = MAE_Encoder(self._image_size,
                                     self._patch_size,
                                     self._emb_dim,
                                     self._encoder_layer,
                                     self._encoder_head)
- 
-        text_encoder = TextEncoder(self._cfg.text_encoder_name, pretrained=True, trainable=False)
-        image_projection = ProjectionHead(embedding_dim=self._cfg.image_embedding, projection_dim=self._cfg.projection_dim, dropout=self._cfg.dropout)
-        text_projection = ProjectionHead(embedding_dim=self._cfg.text_embedding, projection_dim=self._cfg.projection_dim, dropout=self._cfg.dropout)
 
-        self.clip = CLIP(self.image_encoder, text_encoder, image_projection, text_projection, self._cfg.temperature)
+        text_encoder = TextEncoder(self._cfg.text.encoder.name, pretrained=self._cfg.text.encoder.pretrained, trainable=self._cfg.text.encoder.trainable)
+        image_projection = ProjectionHead(embedding_dim=self._emb_dim, projection_dim=self._cfg.clip.projection, dropout=self._cfg.clip.dropout)
+        text_projection = ProjectionHead(embedding_dim=self._cfg.text.encoder.embeddings, projection_dim=self._cfg.clip.projection, dropout=self._cfg.clip.dropout)
+
+        self.clip = CLIP(self.image_encoder, text_encoder, image_projection, text_projection, self._cfg.clip.temperature)
 
         self.mae_decoder = MAE_Decoder(self._image_size,
                                   self._patch_size,
