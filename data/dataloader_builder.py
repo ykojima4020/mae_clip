@@ -1,4 +1,5 @@
 import torch
+import torch.distributed as dist
 
 from data.dataset import CLIPDataset
 from misc.transforms import get_original_vit_image_encoder_transforms
@@ -11,7 +12,7 @@ class CLIPDataLoaderBuilder():
         self._batch_size = batch_size
         self._num_workers = num_workers
 
-    def __call__(self, image_path, annotation_json, mode, test=False):
+    def __call__(self, image_path, annotation_json, mode, rank, world_size, test=False):
         transforms = get_original_vit_image_encoder_transforms(mode)
         if not test:
             dataframe = get_coco_captions_df(annotation_json)
@@ -25,9 +26,15 @@ class CLIPDataLoaderBuilder():
             tokenizer=self._tokenizer,
             transforms=transforms,
         )
+        sampler = torch.utils.data.distributed.DistributedSampler(
+            dataset, 
+            num_replicas=world_size, 
+            rank=dist.get_rank(),
+            shuffle=True if mode == "train" else False)
         dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=self._batch_size, num_workers=self._num_workers,
-            shuffle=True if mode == "train" else False)
-        return dataloader
+            shuffle=sampler is None,
+            sampler=sampler)
+        return dataloader, sampler
     
     

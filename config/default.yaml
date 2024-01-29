@@ -71,3 +71,4 @@ wandb: false
 local_rank: ???
 vis: []
 device: 'cuda'
+world_size: 4

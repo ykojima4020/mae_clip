@@ -51,6 +51,9 @@ def get_config(args):
     if hasattr(args, 'device') and args.device:
         cfg.device = args.device
 
+    if hasattr(args, 'epochs') and args.epochs:
+        cfg.train.epochs = args.epochs
+
     '''
     if hasattr(args, 'amp_opt_level') and args.amp_opt_level:
         cfg.train.amp_opt_level = args.amp_opt_level

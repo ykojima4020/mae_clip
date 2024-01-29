@@ -41,6 +41,10 @@ class CLIP(nn.Module):
         text_embeddings = self.text_encode(batch['input_ids'], batch['attention_mask'])
 
         # Calculating the Loss
+        # collect embeddings from all GPUs for calculating a contrastive loss
+        image_embeddings_gather = concat_all_gather(image_embeddings)
+        text_embeddings_gather = concat_all_gather(text_embeddings)
+
         loss = self.loss(image_embeddings, text_embeddings)
         return loss
 
@@ -54,6 +58,22 @@ def cross_entropy(preds, targets, reduction='none'):
         return loss
     elif reduction == "mean":
         return loss.mean()
+
+# utils
+# this is a function from https://github.com/facebookresearch/moco/blob/main/moco/builder.py#L178
+@torch.no_grad()
+def concat_all_gather(tensor):
+    """
+    Performs all_gather operation on the provided tensors.
+    *** Warning ***: torch.distributed.all_gather has no gradient.
+    """
+    tensors_gather = [
+        torch.ones_like(tensor) for _ in range(torch.distributed.get_world_size())
+    ]
+    torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
+
+    output = torch.cat(tensors_gather, dim=0)
+    return output
 
 if __name__ == '__main__':
     images = torch.randn(8, 3, 224, 224)
