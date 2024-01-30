@@ -14,14 +14,14 @@ class Trainer():
 
 class SimpleTrainer(Trainer):
 
-    def __init__(self, data_loader, optimizer, device):
+    def __init__(self, data_loader, optimizer, grad_norm, device):
         self._reset()
         self._data_loader = data_loader
         self._optimizer = optimizer
         self._device = device
 
         self._scaler = torch.cuda.amp.GradScaler()
-        self._grad_norm = 0.1
+        self._grad_norm = grad_norm
 
     def _reset(self):
         self._loss_meter = AvgMeter()

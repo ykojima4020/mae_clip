@@ -70,7 +70,7 @@ def main(cfg):
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=cfg.train.lr_scheduler.patience, factor=cfg.train.lr_scheduler.factor)
 
-    trainer = SimpleTrainer(train_loader, optimizer, device)
+    trainer = SimpleTrainer(train_loader, optimizer, cfg.train.clip_grad, device)
     validater = SimpleValidater(train_loader, optimizer, device)
 
     best_loss = float('inf')
