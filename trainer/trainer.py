@@ -36,7 +36,7 @@ class SimpleTrainer(Trainer):
             batch = {k: v.to(self._device) for k, v in batch.items() if k != "caption"}
 
             with torch.autocast(device_type='cuda'):
-                loss, clip_loss, mae_loss, _ = model(batch)
+                loss, clip_loss, mae_loss, _, _ = model(batch)
             self._scaler.scale(loss).backward()
 
             self._scaler.unscale_(self._optimizer)

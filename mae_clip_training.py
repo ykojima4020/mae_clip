@@ -82,14 +82,13 @@ def main(cfg):
         stats = stats | train_stats
         model.eval()
         with torch.no_grad():
-            # valid_stats, table = valid_epoch(model, val_loader)
             valid_stats, table = validater(model)
             stats = stats | valid_stats
 
         if stats['valid']['loss'] < best_loss:
             best_loss = stats['valid']['loss']
             checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
-            save_checkpoint(checkpoint, model, epoch)
+            save_checkpoint(checkpoint, model, epoch, stats['logit_scale'])
             print("Saved Best Model!")
         lr_scheduler.step(stats['valid']['loss'])
         if cfg.wandb:

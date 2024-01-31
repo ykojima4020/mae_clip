@@ -29,7 +29,7 @@ class SimpleValidater(Validater):
         for batch in tqdm_object:
             batch = {k: v.to(self._device) for k, v in batch.items() if k != "caption"}
     
-            loss, clip_loss, mae_loss, reconstructed_img = model(batch)
+            loss, clip_loss, mae_loss, reconstructed_img, logit_scale = model(batch)
             count = batch["image"].size(0)
             self._loss_meter.update(loss.item(), count)
             self._clip_loss_meter.update(clip_loss.item(), count)
@@ -42,7 +42,8 @@ class SimpleValidater(Validater):
             table.add_data(wandb.Image(sample), wandb.Image(reconstruct))
         stats = {'valid': {'loss': self._loss_meter.avg,
                            'clip_loss': self._clip_loss_meter.avg,
-                           'mae_loss': self._mae_loss_meter.avg}}
+                           'mae_loss': self._mae_loss_meter.avg},
+                 'logit_scale': logit_scale}
         return stats, table
     
     
