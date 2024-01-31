@@ -13,6 +13,7 @@ from factory import MAECLIPFactory
 from data.dataloader_builder import CLIPDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
+from evaluator.evaluator import ZeroShotImageNetEvaluator
 from misc.utils import AvgMeter, get_lr
 from misc.saver import save_checkpoint
 from misc.config import get_config
@@ -72,6 +73,7 @@ def main(cfg):
 
     trainer = SimpleTrainer(train_loader, optimizer, cfg.train.clip_grad, device)
     validater = SimpleValidater(train_loader, optimizer, device)
+    evaluator = ZeroShotImageNetEvaluator(tokenizer)
 
     best_loss = float('inf')
     for epoch in range(cfg.train.epochs):
@@ -90,6 +92,9 @@ def main(cfg):
             checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
             save_checkpoint(checkpoint, model, epoch, stats['logit_scale'])
             print("Saved Best Model!")
+        eval_stats = evaluator(model.clip)
+        stats = stats | eval_stats
+
         lr_scheduler.step(stats['valid']['loss'])
         if cfg.wandb:
             wandb.log(stats)
