@@ -53,9 +53,6 @@ def main(cfg):
         cfg.train.lr = cfg.train.base_lr * cfg.data.batch_size / 256 # 1e-3 * 64 / 256 = 0.00025
 
     if cfg.wandb:
-        # wandb_config = vars(cfg)
-        # print(wandb_config)
-        # run = wandb.init(project="mae_clip", entity="ykojima") 
         run = wandb.init(project="mae_clip", entity="ykojima", config=OmegaConf.to_container(cfg, resolve=True)) 
 
     tokenizer = DistilBertTokenizer.from_pretrained(cfg.model.text.encoder.name)
@@ -73,7 +70,7 @@ def main(cfg):
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=cfg.train.lr_scheduler.patience, factor=cfg.train.lr_scheduler.factor)
 
-    trainer = SimpleTrainer(train_loader, optimizer, device)
+    trainer = SimpleTrainer(train_loader, optimizer, cfg.train.clip_grad, device)
     validater = SimpleValidater(train_loader, optimizer, device)
 
     best_loss = float('inf')
