@@ -14,7 +14,6 @@ class CLIP(nn.Module):
     def image_encode(self, image):
         # Getting Image and Text Features
         image_features = self._image_encoder(image)[0][0, :, :]
-        # print("image_features: ", image_features.shape)
         image_embeddings = self._image_projection(image_features)
         return image_embeddings 
 
