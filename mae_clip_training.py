@@ -17,6 +17,7 @@ from factory import MAECLIPFactory
 from data.dataloader_builder import CLIPDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
+from evaluator.evaluator import ZeroShotImageNetEvaluator
 from misc.utils import AvgMeter, get_lr
 from misc.saver import save_checkpoint
 from misc.config import get_config
@@ -80,8 +81,10 @@ def main(rank, world_size, cfg):
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", patience=cfg.train.lr_scheduler.patience, factor=cfg.train.lr_scheduler.factor)
 
-    trainer = SimpleTrainer(train_loader, optimizer, rank)
-    validater = SimpleValidater(train_loader, optimizer, rank)
+    trainer = SimpleTrainer(train_loader, optimizer, cfg.train.clip_grad, rank)
+    validater = SimpleValidater(val_loader, optimizer, rank)
+    if dist.get_rank() == 0:
+        evaluator = ZeroShotImageNetEvaluator(tokenizer, rank)
 
     best_loss = float('inf')
     for epoch in range(cfg.train.epochs):
@@ -100,8 +103,12 @@ def main(rank, world_size, cfg):
         if stats['valid']['loss'] < best_loss and dist.get_rank() == 0:
             best_loss = stats['valid']['loss']
             checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
-            save_checkpoint(checkpoint, ddp_model.module, epoch)
+            save_checkpoint(checkpoint, ddp_model.module, epoch, stats['logit_scale'])
             print("Saved Best Model!")
+        if dist.get_rank() == 0:
+            eval_stats = evaluator(ddp_model.module.clip)
+            stats = stats | eval_stats
+
         lr_scheduler.step(stats['valid']['loss'])
         if cfg.wandb and dist.get_rank() == 0:
             wandb.log(stats)

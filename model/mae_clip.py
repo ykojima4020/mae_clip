@@ -45,10 +45,10 @@ class MAECLIP(nn.Module):
 
 
     def forward(self, batch):
-        clip_loss = self.clip(batch)
+        clip_loss, logit_scale = self.clip(batch)
         predicted_img, mask = self.mae(batch['image'])
         mae_loss = torch.mean((predicted_img - batch['image']) ** 2 * mask) / self._mask_ratio
 
         total_loss = clip_loss + self._alpha * mae_loss
-        return total_loss, clip_loss, mae_loss, predicted_img
+        return total_loss, clip_loss, mae_loss, predicted_img, logit_scale
 

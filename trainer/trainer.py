@@ -1,3 +1,6 @@
+import torch
+from torch import nn
+
 from tqdm import tqdm
 from misc.utils import AvgMeter, get_lr
 
@@ -11,11 +14,14 @@ class Trainer():
 
 class SimpleTrainer(Trainer):
 
-    def __init__(self, data_loader, optimizer, device):
+    def __init__(self, data_loader, optimizer, grad_norm, device):
         self._reset()
         self._data_loader = data_loader
         self._optimizer = optimizer
         self._device = device
+
+        self._scaler = torch.cuda.amp.GradScaler()
+        self._grad_norm = grad_norm
 
     def _reset(self):
         self._loss_meter = AvgMeter()
@@ -26,12 +32,18 @@ class SimpleTrainer(Trainer):
         self._reset()
         tqdm_object = tqdm(self._data_loader, total=len(self._data_loader))
         for batch in tqdm_object:
-            batch = {k: v.to(self._device) for k, v in batch.items() if k != "caption"}
-            loss, clip_loss, mae_loss, _ = model(batch)
             self._optimizer.zero_grad()
-            loss.backward()
-            self._optimizer.step()
-    
+            batch = {k: v.to(self._device) for k, v in batch.items() if k != "caption"}
+
+            with torch.autocast(device_type='cuda'):
+                loss, clip_loss, mae_loss, _, _ = model(batch)
+            self._scaler.scale(loss).backward()
+
+            self._scaler.unscale_(self._optimizer)
+            nn.utils.clip_grad_norm_(model.parameters(), self._grad_norm)
+            self._scaler.step(self._optimizer)
+            self._scaler.update()
+
             count = batch["image"].size(0)
             self._loss_meter.update(loss.item(), count)
             self._clip_loss_meter.update(clip_loss.item(), count)

@@ -17,7 +17,7 @@ train:
   weight_decay: 0.05
   warmup_lr: 4e-6
   min_lr: 4e-5
-  clip_grad: 5.0
+  clip_grad: 0.1
   accumulation_steps: 0
   amp_opt_level: O1
   seed: 0
