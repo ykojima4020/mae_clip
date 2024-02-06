@@ -10,7 +10,7 @@ from transformers import DistilBertTokenizer
 from omegaconf import OmegaConf
 
 from factory import MAECLIPFactory
-from data.dataloader_builder import CLIPDataLoaderBuilder
+from data.dataloader_builder import CLIPDataLoaderBuilder, GCC3MDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
 from evaluator.evaluator import ZeroShotImageNetEvaluator
@@ -61,8 +61,10 @@ def main(cfg):
     model = factory.create().to(device)
 
     dataloader_builder = CLIPDataLoaderBuilder(tokenizer, cfg.data.batch_size, cfg.data.num_workers)
-    train_loader = dataloader_builder(cfg.data.dataset.train_image_path,
-                                      cfg.data.dataset.train_json, 'train', test=cfg.test)
+    gcc3m_dataloader_builder = GCC3MDataLoaderBuilder(cfg.data, tokenizer, cfg.data.batch_size, cfg.data.num_workers)
+
+    train_loader = gcc3m_dataloader_builder('train', test=cfg.test)
+
     val_loader = dataloader_builder(cfg.data.dataset.val_image_path,
                                       cfg.data.dataset.val_json, 'val', test=cfg.test)
 
@@ -72,7 +74,7 @@ def main(cfg):
         optimizer, mode="min", patience=cfg.train.lr_scheduler.patience, factor=cfg.train.lr_scheduler.factor)
 
     trainer = SimpleTrainer(train_loader, optimizer, cfg.train.clip_grad, device)
-    validater = SimpleValidater(train_loader, optimizer, device)
+    validater = SimpleValidater(val_loader, optimizer, device)
     evaluator = ZeroShotImageNetEvaluator(tokenizer)
 
     best_loss = float('inf')
