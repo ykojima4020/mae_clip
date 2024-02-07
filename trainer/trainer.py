@@ -14,10 +14,12 @@ class Trainer():
 
 class SimpleTrainer(Trainer):
 
-    def __init__(self, data_loader, optimizer, grad_norm, device):
+    def __init__(self, data_loader, optimizer, lr_scheduler, grad_norm, device):
         self._reset()
         self._data_loader = data_loader
+        self._num_steps = len(data_loader)
         self._optimizer = optimizer
+        self._lr_scheduler = lr_scheduler
         self._device = device
 
         self._scaler = torch.cuda.amp.GradScaler()
@@ -28,10 +30,10 @@ class SimpleTrainer(Trainer):
         self._clip_loss_meter = AvgMeter()
         self._mae_loss_meter = AvgMeter()
 
-    def __call__(self, model):
+    def __call__(self, model, epoch):
         self._reset()
         tqdm_object = tqdm(self._data_loader, total=len(self._data_loader))
-        for batch in tqdm_object:
+        for idx, batch in enumerate(tqdm_object):
             self._optimizer.zero_grad()
             batch = {k: v.to(self._device) for k, v in batch.items() if k != "caption"}
 
@@ -43,6 +45,7 @@ class SimpleTrainer(Trainer):
             nn.utils.clip_grad_norm_(model.parameters(), self._grad_norm)
             self._scaler.step(self._optimizer)
             self._scaler.update()
+            self._lr_scheduler.step_update(epoch * self._num_steps + idx)
 
             count = batch["image"].size(0)
             self._loss_meter.update(loss.item(), count)
@@ -56,5 +59,3 @@ class SimpleTrainer(Trainer):
                            'mae_loss': self._mae_loss_meter.avg},
                  'lr': lr}
         return stats
-    
-    
