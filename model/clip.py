@@ -28,6 +28,11 @@ class CLIP(nn.Module):
     def loss(self, image_embeddings, text_embeddings):
         # Calculating the Loss
         logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
+
+        # [B, C]
+        image_embeddings = F.normalize(image_embeddings, dim=-1)
+        text_embeddings = F.normalize(text_embeddings, dim=-1)
+
         logits = (text_embeddings @ image_embeddings.T) * logit_scale
 
         images_similarity = image_embeddings @ image_embeddings.T
