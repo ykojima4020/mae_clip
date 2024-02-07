@@ -83,13 +83,6 @@ class RILSMAECLIP(nn.Module):
             emb_dim=self._emb_dim, num_layer=self._decoder_layer,
             num_head=self._decoder_head)
  
-        """
-        self.mae_decoder = RILSMAEDecoder(
-            img_size=self._image_size, patch_size=self._patch_size,
-            embed_dim=self._emb_dim, decoder_embed_dim=self._emb_dim, decoder_depth=self._decoder_layer,
-            decoder_num_heads=self._decoder_head)
-        """
-
         text_encoder = TextEncoder(self._cfg.text.encoder.name, pretrained=self._cfg.text.encoder.pretrained, trainable=self._cfg.text.encoder.trainable)
         image_projection = ProjectionHead(embedding_dim=self._emb_dim, projection_dim=self._cfg.clip.projection, dropout=self._cfg.clip.dropout)
         text_projection = ProjectionHead(embedding_dim=self._cfg.text.encoder.embeddings, projection_dim=self._cfg.clip.projection, dropout=self._cfg.clip.dropout)
@@ -99,10 +92,10 @@ class RILSMAECLIP(nn.Module):
         self.mae = MAE_ViT(self.image_encoder, self.mae_decoder, self._mask_ratio)
 
     def forward(self, batch):
-        clip_loss = self.clip(batch)
+        clip_loss, logit_scale = self.clip(batch)
         predicted_img, mask = self.mae(batch['image'])
         mae_loss = torch.mean((predicted_img - batch['image']) ** 2 * mask) / self._mask_ratio
 
         total_loss = clip_loss + self._alpha * mae_loss
-        return total_loss, clip_loss, mae_loss, predicted_img
+        return total_loss, clip_loss, mae_loss, predicted_img, logit_scale
 
