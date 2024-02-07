@@ -1,31 +1,45 @@
 data:
   batch_size: 256
+  pin_memory: true
   num_workers: 6
+  shuffle_buffer: 10000
   seed: ${train.seed}
   dataset:
-    train_image_path: '/data/yuto/datasets/coco/train2017'
-    train_json: '/data/yuto/datasets/coco/annotations/captions_train2017.json'
-    val_image_path: '/data/yuto/datasets/coco/val2017'
-    val_json: '/data/yuto/datasets/coco/annotations/captions_val2017.json'
+    train_image_path: 'path'
+    train_json: 'path'
+    val_image_path: 'path'
+    val_json: 'path'
+
+    meta:
+      gcc3m:
+        type: img_txt_pair
+        path: 'path'
+        prefix: gcc-train-{000000..001242}.tar
+        length: 2248678
+
+    train:
+      - gcc3m
+
+  img_aug:
+  text_aug:
+    max_seq_len: 77
 
 train:
   start_epoch: 0
-  epochs: 30
+  epochs: 100
   warmup_epochs: 2
   lr: null
   base_lr: 1e-3
   weight_decay: 0.05
   warmup_lr: 4e-6
   min_lr: 4e-5
-  clip_grad: 5.0
+  clip_grad: 0.1
   accumulation_steps: 0
   amp_opt_level: O1
   seed: 0
 
   lr_scheduler:
-    # name: cosine
-    patience: 1
-    factor: 0.8
+    name: cosine
 
   optimizer:
     name: adamw
