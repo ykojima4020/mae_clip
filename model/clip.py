@@ -1,4 +1,5 @@
 import torch
+import torch.distributed as dist
 from torch import nn
 import torch.nn.functional as F
 
@@ -10,7 +11,6 @@ class CLIP(nn.Module):
         self._image_projection = image_projection
         self._text_projection = text_projection
         self._temperature = 0.07
-        # self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / self._temperature))
         self.logit_scale = nn.Parameter(torch.ones([]) *  self._temperature)
 
     def image_encode(self, image):
@@ -25,32 +25,36 @@ class CLIP(nn.Module):
         text_embeddings = self._text_projection(text_features)
         return text_embeddings
 
-    def loss(self, image_embeddings, text_embeddings):
-        # Calculating the Loss
-        logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
-        logits = (text_embeddings @ image_embeddings.T) * logit_scale
+    def loss(self, image_x, text_x):
 
-        images_similarity = image_embeddings @ image_embeddings.T
-        texts_similarity = text_embeddings @ text_embeddings.T
-        targets = F.softmax(
-            ((images_similarity + texts_similarity) / 2) * logit_scale, dim=-1
-        )
-        texts_loss = cross_entropy(logits, targets, reduction='none')
-        images_loss = cross_entropy(logits.T, targets.T, reduction='none')
-        loss =  (images_loss + texts_loss) / 2.0 # shape: (batch_size)
-        return loss.mean(), logit_scale
+        batch_size = image_x.shape[0]
+
+        logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
+
+        image_x_all = concat_all_gather(image_x)
+        text_x_all = concat_all_gather(text_x)
+ 
+        images_similarity = image_x_all @ image_x_all.T
+        texts_similarity = text_x_all @ text_x_all.T
+        targets = F.softmax(((images_similarity + texts_similarity) / 2) * logit_scale, dim=-1) # [B, B]
+
+        start = dist.get_rank() * batch_size
+        end = start + batch_size
+        targets = targets[start:end]             # [B/gpus, B]
+
+        logits_per_img = image_x @ text_x_all.T  # [B/gpus, B]
+        logits_per_text = text_x @ image_x_all.T # [B/gpus, B]
+
+        texts_loss = cross_entropy(logits_per_text, targets, reduction='mean')
+        images_loss = cross_entropy(logits_per_img, targets, reduction='mean')
+        loss =  (images_loss + texts_loss) / 2.0
+        return loss, logit_scale
 
     def forward(self, batch):
-        image_embeddings = self.image_encode(batch['image'])
-        text_embeddings = self.text_encode(batch['input_ids'], batch['attention_mask'])
+        image_x = self.image_encode(batch['image'])
+        loss, logit_scale = self.loss(image_x, text_x)
 
-        # Calculating the Loss
-        # collect embeddings from all GPUs for calculating a contrastive loss
-        image_embeddings_gather = concat_all_gather(image_embeddings)
-        text_embeddings_gather = concat_all_gather(text_embeddings)
-
-        loss = self.loss(image_embeddings, text_embeddings)
-        return loss
+        return loss, logit_scale
 
     def get_transforms(self, mode):
         return self._image_encoder.get_transforms(mode)
