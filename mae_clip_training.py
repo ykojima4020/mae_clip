@@ -10,9 +10,10 @@ from transformers import DistilBertTokenizer
 from omegaconf import OmegaConf
 
 from factory import MAECLIPFactory
-from data.dataloader_builder import CLIPDataLoaderBuilder
+from data.dataloader_builder import CLIPDataLoaderBuilder, GCC3MDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
+from evaluator.evaluator import ZeroShotImageNetEvaluator
 from misc.utils import AvgMeter, get_lr
 from misc.saver import save_checkpoint
 from misc.config import get_config
@@ -54,9 +55,6 @@ def main(cfg):
         cfg.train.lr = cfg.train.base_lr * cfg.data.batch_size / 256 # 1e-3 * 64 / 256 = 0.00025
 
     if cfg.wandb:
-        # wandb_config = vars(cfg)
-        # print(wandb_config)
-        # run = wandb.init(project="mae_clip", entity="ykojima") 
         run = wandb.init(project="mae_clip", entity="ykojima", config=OmegaConf.to_container(cfg, resolve=True)) 
 
     tokenizer = DistilBertTokenizer.from_pretrained(cfg.model.text.encoder.name)
@@ -64,8 +62,10 @@ def main(cfg):
     model = factory.create().to(device)
 
     dataloader_builder = CLIPDataLoaderBuilder(tokenizer, cfg.data.batch_size, cfg.data.num_workers)
-    train_loader = dataloader_builder(cfg.data.dataset.train_image_path,
-                                      cfg.data.dataset.train_json, 'train', test=cfg.test)
+    gcc3m_dataloader_builder = GCC3MDataLoaderBuilder(cfg.data, tokenizer, cfg.data.batch_size, cfg.data.num_workers)
+
+    train_loader = gcc3m_dataloader_builder('train', test=cfg.test)
+
     val_loader = dataloader_builder(cfg.data.dataset.val_image_path,
                                       cfg.data.dataset.val_json, 'val', test=cfg.test)
 
@@ -74,8 +74,9 @@ def main(cfg):
         lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
     lr_scheduler = build_scheduler(cfg.train, optimizer, len(train_loader))
 
-    trainer = SimpleTrainer(train_loader, optimizer, lr_scheduler, device)
-    validater = SimpleValidater(train_loader, optimizer, device)
+    trainer = SimpleTrainer(train_loader, optimizer, lr_scheduler, cfg.train.clip_grad, device)
+    validater = SimpleValidater(val_loader, optimizer, device)
+    evaluator = ZeroShotImageNetEvaluator(tokenizer)
 
     best_loss = float('inf')
     for epoch in range(cfg.train.epochs):
@@ -86,16 +87,17 @@ def main(cfg):
         stats = stats | train_stats
         model.eval()
         with torch.no_grad():
-            # valid_stats, table = valid_epoch(model, val_loader)
             valid_stats, table = validater(model)
             stats = stats | valid_stats
 
         if stats['valid']['loss'] < best_loss:
             best_loss = stats['valid']['loss']
             checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
-            save_checkpoint(checkpoint, model, epoch)
+            save_checkpoint(checkpoint, model, epoch, stats['logit_scale'])
             print("Saved Best Model!")
-        # lr_scheduler.step(stats['valid']['loss'])
+        eval_stats = evaluator(model.clip)
+        stats = stats | eval_stats
+
         if cfg.wandb:
             wandb.log(stats)
             wandb.log({'image': table})

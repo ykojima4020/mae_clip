@@ -3,13 +3,15 @@ from torch import nn
 import torch.nn.functional as F
 
 class CLIP(nn.Module):
-    def __init__(self, image_encoder, text_encoder, image_projection, text_projection, temperature):
+    def __init__(self, image_encoder, text_encoder, image_projection, text_projection, temperature=0.07):
         super().__init__()
         self._image_encoder = image_encoder
         self._text_encoder = text_encoder
         self._image_projection = image_projection
         self._text_projection = text_projection
-        self._temperature = temperature
+        self._temperature = 0.07
+        # self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / self._temperature))
+        self.logit_scale = nn.Parameter(torch.ones([]) *  self._temperature)
 
     def image_encode(self, image):
         # Getting Image and Text Features
@@ -25,16 +27,23 @@ class CLIP(nn.Module):
 
     def loss(self, image_embeddings, text_embeddings):
         # Calculating the Loss
-        logits = (text_embeddings @ image_embeddings.T) / self._temperature
+        logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
+
+        # [B, C]
+        image_embeddings = F.normalize(image_embeddings, dim=-1)
+        text_embeddings = F.normalize(text_embeddings, dim=-1)
+
+        logits = (text_embeddings @ image_embeddings.T) * logit_scale
+
         images_similarity = image_embeddings @ image_embeddings.T
         texts_similarity = text_embeddings @ text_embeddings.T
         targets = F.softmax(
-            (images_similarity + texts_similarity) / 2 * self._temperature, dim=-1
+            ((images_similarity + texts_similarity) / 2) * logit_scale, dim=-1
         )
         texts_loss = cross_entropy(logits, targets, reduction='none')
         images_loss = cross_entropy(logits.T, targets.T, reduction='none')
         loss =  (images_loss + texts_loss) / 2.0 # shape: (batch_size)
-        return loss.mean()
+        return loss.mean(), logit_scale
 
     def forward(self, batch):
         image_embeddings = self.image_encode(batch['image'])
