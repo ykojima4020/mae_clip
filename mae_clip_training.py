@@ -14,13 +14,14 @@ from transformers import DistilBertTokenizer
 from omegaconf import OmegaConf
 
 from factory import MAECLIPFactory
-from data.dataloader_builder import CLIPDataLoaderBuilder
+from data.dataloader_builder import CLIPDataLoaderBuilder, GCC3MDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
 from evaluator.evaluator import ZeroShotImageNetEvaluator
 from misc.utils import AvgMeter, get_lr
 from misc.saver import save_checkpoint
 from misc.config import get_config
+from misc.lr_scheduler import build_scheduler
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
@@ -70,18 +71,20 @@ def main(rank, world_size, cfg):
     model = factory.create().to(rank)
     ddp_model = DDP(model, device_ids=[rank])
 
-    dataloader_builder = CLIPDataLoaderBuilder(tokenizer, cfg.data.batch_size, cfg.data.num_workers)
-    train_loader, train_sampler = dataloader_builder(cfg.data.dataset.train_image_path,
-                                      cfg.data.dataset.train_json, 'train', rank, world_size, test=cfg.test)
+    dataloader_builder = CLIPDataLoaderBuilder(cfg.data, tokenizer)
+    gcc3m_dataloader_builder = GCC3MDataLoaderBuilder(cfg.data, tokenizer)
+
+    train_loader, train_sampler = gcc3m_dataloader_builder('train', rank, world_size, test=cfg.test)
+
     val_loader, _ = dataloader_builder(cfg.data.dataset.val_image_path,
                                       cfg.data.dataset.val_json, 'val', rank, world_size, test=cfg.test)
 
     optimizer = torch.optim.AdamW(
-        ddp_model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", patience=cfg.train.lr_scheduler.patience, factor=cfg.train.lr_scheduler.factor)
+        model.parameters(), eps=cfg.train.optimizer.eps, betas=cfg.train.optimizer.betas,
+        lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
+    lr_scheduler = build_scheduler(cfg.train, optimizer, len(train_loader))
 
-    trainer = SimpleTrainer(train_loader, optimizer, cfg.train.clip_grad, rank)
+    trainer = SimpleTrainer(train_loader, optimizer, lr_scheduler, cfg.train.clip_grad, rank)
     validater = SimpleValidater(val_loader, optimizer, rank)
     if dist.get_rank() == 0:
         evaluator = ZeroShotImageNetEvaluator(tokenizer, rank)
@@ -89,11 +92,12 @@ def main(rank, world_size, cfg):
     best_loss = float('inf')
     for epoch in range(cfg.train.epochs):
         dist.barrier()
-        train_sampler.set_epoch(epoch)
+        # [TODO]: when using webdataset, sampler can not be used. How should I do?
+        # train_sampler.set_epoch(epoch)
         stats = {'epoch': epoch}
         print(f"Epoch: {epoch + 1}")
         ddp_model.train()
-        train_stats = trainer(ddp_model)
+        train_stats = trainer(ddp_model, epoch)
         stats = stats | train_stats
         ddp_model.eval()
         with torch.no_grad():
@@ -108,8 +112,6 @@ def main(rank, world_size, cfg):
         if dist.get_rank() == 0:
             eval_stats = evaluator(ddp_model.module.clip)
             stats = stats | eval_stats
-
-        lr_scheduler.step(stats['valid']['loss'])
         if cfg.wandb and dist.get_rank() == 0:
             wandb.log(stats)
             wandb.log({'image': table})
@@ -133,7 +135,6 @@ if __name__ == "__main__":
     args = get_args_parser()
     args = args.parse_args()
     cfg = get_config(args)
-    # device = torch.device(cfg.device)
     if cfg.output:
         pathlib.Path(args.output).mkdir(parents=True, exist_ok=True)
 

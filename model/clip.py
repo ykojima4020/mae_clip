@@ -16,7 +16,6 @@ class CLIP(nn.Module):
     def image_encode(self, image):
         # Getting Image and Text Features
         image_features = self._image_encoder(image)[0][0, :, :]
-        # print("image_features: ", image_features.shape)
         image_embeddings = self._image_projection(image_features)
         return image_embeddings 
 
@@ -26,10 +25,11 @@ class CLIP(nn.Module):
         return text_embeddings
 
     def loss(self, image_x, text_x):
-
         batch_size = image_x.shape[0]
 
         logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
+        image_x = F.normalize(image_x, dim=-1)
+        text_x = F.normalize(text_x, dim=-1)
 
         image_x_all = concat_all_gather(image_x)
         text_x_all = concat_all_gather(text_x)
@@ -52,6 +52,7 @@ class CLIP(nn.Module):
 
     def forward(self, batch):
         image_x = self.image_encode(batch['image'])
+        text_x = self.text_encode(batch['input_ids'], batch['attention_mask'])
         loss, logit_scale = self.loss(image_x, text_x)
 
         return loss, logit_scale
