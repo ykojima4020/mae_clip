@@ -80,7 +80,7 @@ def main(rank, world_size, cfg):
                                       cfg.data.dataset.val_json, 'val', rank, world_size, test=cfg.test)
 
     optimizer = torch.optim.AdamW(
-        model.parameters(), eps=cfg.train.optimizer.eps, betas=cfg.train.optimizer.betas,
+        ddp_model.parameters(), eps=cfg.train.optimizer.eps, betas=cfg.train.optimizer.betas,
         lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
     lr_scheduler = build_scheduler(cfg.train, optimizer, len(train_loader))
 
