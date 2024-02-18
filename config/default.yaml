@@ -42,6 +42,7 @@ train:
     name: cosine
 
   optimizer:
+    param_groups: false
     name: adamw
     eps: 1e-8
     betas: [0.9, 0.999]
