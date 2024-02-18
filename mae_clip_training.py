@@ -2,7 +2,6 @@ import os
 import sys
 from tqdm import tqdm
 import pathlib
-import wandb
 import argparse
 
 import torch
@@ -11,17 +10,20 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
 
 from transformers import DistilBertTokenizer
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, read_write
 
 from factory import MAECLIPFactory
 from data.dataloader_builder import CLIPDataLoaderBuilder, GCC3MDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
 from evaluator.evaluator import ZeroShotImageNetEvaluator
+
 from misc.utils import AvgMeter, get_lr
-from misc.saver import save_checkpoint
+# from misc.saver import save_checkpoint
 from misc.config import get_config
 from misc.lr_scheduler import build_scheduler
+from misc.checkpoint import auto_resume_helper, load_checkpoint, save_checkpoint
+from misc.logger import get_logger
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
@@ -51,10 +53,10 @@ def get_args_parser():
 
 def main(rank, world_size, cfg):
 
-    print(f"Running train on rank {rank}.")
     setup(rank, world_size)
 
-    output_dir = pathlib.Path(cfg.output)
+    logger = get_logger()
+    logger.info(f"Running train on rank {rank}.")
 
     if dist.get_rank() == 0:
         print(cfg)
@@ -63,13 +65,23 @@ def main(rank, world_size, cfg):
         cfg.train.lr = cfg.train.base_lr * cfg.data.batch_size * world_size / 256 # 1e-3 * 64 / 256 = 0.00025
 
     if cfg.wandb and dist.get_rank() == 0:
-        run = wandb.init(project="mae_clip", entity="ykojima", config=OmegaConf.to_container(cfg, resolve=True)) 
+        import wandb
+        run = wandb.init(
+            project='mae_clip', entity="ykojima",
+            dir=cfg.output,
+            config=OmegaConf.to_container(cfg, resolve=True),
+            resume=cfg.checkpoint.auto_resume)
+    else:
+        wandb = None 
+    # [NOTE]: waiting wandb init
+    dist.barrier()
 
     tokenizer = DistilBertTokenizer.from_pretrained(cfg.model.text.encoder.name)
     factory = MAECLIPFactory(cfg.model)
 
     model = factory.create().to(rank)
     ddp_model = DDP(model, device_ids=[rank])
+    model_without_ddp = ddp_model.module
 
     dataloader_builder = CLIPDataLoaderBuilder(cfg.data, tokenizer)
     gcc3m_dataloader_builder = GCC3MDataLoaderBuilder(cfg.data, tokenizer)
@@ -89,29 +101,60 @@ def main(rank, world_size, cfg):
     if dist.get_rank() == 0:
         evaluator = ZeroShotImageNetEvaluator(tokenizer, rank)
 
+
+    if cfg.checkpoint.auto_resume:
+        # [NOTE]: Retrieve the most recent .pth file from the designated directory upon auto_resume.
+        #         If the file is founded, cfg.checkpoint.resume is overwritten. 
+        resume_file = auto_resume_helper(cfg.output)
+        if resume_file:
+            if cfg.checkpoint.resume:
+                logger.warning(f'auto-resume changing resume file from {cfg.checkpoint.resume} to {resume_file}')
+            with read_write(cfg):
+                cfg.checkpoint.resume = resume_file
+            logger.info(f'auto resuming from {resume_file}')
+        else:
+            logger.info(f'no checkpoint found in {cfg.output}, ignoring auto resume')
+
     best_loss = float('inf')
-    for epoch in range(cfg.train.epochs):
+    best_acc_5 = 0
+    best_acc_1 = 0
+
+    if cfg.checkpoint.resume:
+        max_metrics = load_checkpoint(cfg, model_without_ddp, optimizer, lr_scheduler)
+        print(max_metrics)
+        # [TODO]: load vest values (ACC Top1, Top5)
+
+    logger.info('Start training')
+    for epoch in range(cfg.train.start_epoch, cfg.train.epochs):
         dist.barrier()
         # [TODO]: when using webdataset, sampler can not be used. How should I do?
         # train_sampler.set_epoch(epoch)
         stats = {'epoch': epoch}
-        print(f"Epoch: {epoch + 1}")
+        logger.info(f"Epoch: {epoch + 1}")
         ddp_model.train()
         train_stats = trainer(ddp_model, epoch)
         stats = stats | train_stats
+
         ddp_model.eval()
         with torch.no_grad():
             valid_stats, table = validater(ddp_model)
             stats = stats | valid_stats
 
-        if stats['valid']['loss'] < best_loss and dist.get_rank() == 0:
-            best_loss = stats['valid']['loss']
-            checkpoint = output_dir / f"checkpoint_{epoch+1}.pth"
-            save_checkpoint(checkpoint, ddp_model.module, epoch, stats['logit_scale'])
-            print("Saved Best Model!")
         if dist.get_rank() == 0:
             eval_stats = evaluator(ddp_model.module.clip)
             stats = stats | eval_stats
+
+        # [NOTE]: in this case, Zero-Shot top1 accuracy is used as the metric for saving the models.
+        # [TODO]: This metric should be flexible.
+        if stats['eval']['imagenet']['top1'] > best_acc_1 and dist.get_rank() == 0:
+            best_acc_1 = stats['eval']['imagenet']['top1']
+            save_checkpoint(cfg, epoch, model_without_ddp, {
+                'val_loss': stats['valid']['loss'],
+                'acc_1': stats['eval']['imagenet']['top1'],
+                'acc_5': stats['eval']['imagenet']['top5']
+            }, optimizer, lr_scheduler)
+            logger.info("Saved Best Model!")
+
         if cfg.wandb and dist.get_rank() == 0:
             wandb.log(stats)
             wandb.log({'image': table})
