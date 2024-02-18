@@ -26,7 +26,7 @@ data:
 
 train:
   start_epoch: 0
-  epochs: 100
+  epochs: 50
   warmup_epochs: 2
   lr: null
   base_lr: 1e-3
@@ -34,8 +34,6 @@ train:
   warmup_lr: 4e-6
   min_lr: 4e-5
   clip_grad: 0.1
-  accumulation_steps: 0
-  amp_opt_level: O1
   seed: 0
 
   lr_scheduler:
@@ -71,18 +69,12 @@ model:
 checkpoint:
   auto_resume: true
   resume: ''
-  freq: 1
   max_kept: -1
-  save_freq: 1
 
 model_name: '' # display name in the logger
 test: false
 output: './tmp'
-tag: default
-print_freq: 10
 seed: 0
 wandb: false
-local_rank: ???
-vis: []
 device: 'cuda'
-world_size: 4
+world_size: 1
