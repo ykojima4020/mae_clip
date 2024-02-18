@@ -19,11 +19,11 @@ from trainer.validater import SimpleValidater
 from evaluator.evaluator import ZeroShotImageNetEvaluator
 
 from misc.utils import AvgMeter, get_lr
-# from misc.saver import save_checkpoint
 from misc.config import get_config
 from misc.lr_scheduler import build_scheduler
 from misc.checkpoint import auto_resume_helper, load_checkpoint, save_checkpoint
 from misc.logger import get_logger
+from misc.optimizer import build_optimizer
 
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
@@ -91,9 +91,7 @@ def main(rank, world_size, cfg):
     val_loader, _ = dataloader_builder(cfg.data.dataset.val_image_path,
                                       cfg.data.dataset.val_json, 'val', rank, world_size, test=cfg.test)
 
-    optimizer = torch.optim.AdamW(
-        ddp_model.parameters(), eps=cfg.train.optimizer.eps, betas=cfg.train.optimizer.betas,
-        lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
+    optimizer = build_optimizer(cfg.train, model)
     lr_scheduler = build_scheduler(cfg.train, optimizer, len(train_loader))
 
     trainer = SimpleTrainer(train_loader, optimizer, lr_scheduler, cfg.train.clip_grad, rank)
