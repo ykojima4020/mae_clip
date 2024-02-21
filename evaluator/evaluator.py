@@ -15,7 +15,7 @@ class Evaluator():
 
 class ZeroShotImageNetEvaluator(Evaluator):
 
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, device):
         self._tokenizer = tokenizer
         self._imagenet_classes = imagenet_config.imagenet_classes
         self._imagenet_templates = imagenet_config.imagenet_templates
@@ -23,6 +23,7 @@ class ZeroShotImageNetEvaluator(Evaluator):
         transforms = get_original_vit_image_encoder_transforms('valid')
         dataset = ImageNetV2Dataset(transform=transforms)
         self._loader = torch.utils.data.DataLoader(dataset, batch_size=32, num_workers=2)
+        self._device = device
 
     def _zeroshot_classifier(self, model, classnames, templates):
         with torch.no_grad():
@@ -32,7 +33,7 @@ class ZeroShotImageNetEvaluator(Evaluator):
                 texts = [template.format(classname) for template in templates] #format with class
                 max_length = 15
                 texts = self._tokenizer(texts, padding=True, truncation=True, max_length=max_length)
-                batch = {key: torch.tensor(values).to("cuda") for key, values in texts.items()}
+                batch = {key: torch.tensor(values).to(self._device) for key, values in texts.items()}
                 class_embeddings = model.text_encode(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]) #embed with text encoder
                 # print(class_embeddings.shape) # the shape is [80, 256]
                 # print(class_embeddings.norm(dim=-1, keepdim=True).shape) # the shape is torch.Size([80, 1])
@@ -54,8 +55,8 @@ class ZeroShotImageNetEvaluator(Evaluator):
         with torch.no_grad():
             top1, top5, n = 0., 0., 0.
             for i, (images, target) in enumerate(tqdm(self._loader)):
-                images = images.cuda()
-                target = target.cuda()
+                images = images.to(self._device)
+                target = target.to(self._device)
                 
                 # predict
                 image_features = model.image_encode(images)

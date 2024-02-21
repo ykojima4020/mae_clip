@@ -1,6 +1,7 @@
 import os.path as osp
 
 import torch
+import torch.distributed as dist
 
 from data.dataset import CLIPDataset
 from misc.transforms import get_original_vit_image_encoder_transforms
@@ -11,12 +12,13 @@ import webdataset as wds
 
 class CLIPDataLoaderBuilder():
 
-    def __init__(self, tokenizer, batch_size, num_workers):
+    def __init__(self, cfg, tokenizer):
         self._tokenizer = tokenizer
-        self._batch_size = batch_size
-        self._num_workers = num_workers
+        self._batch_size = cfg.batch_size
+        self._num_workers = cfg.num_workers
+        self._pin_memory = cfg.pin_memory
 
-    def __call__(self, image_path, annotation_json, mode, test=False):
+    def __call__(self, image_path, annotation_json, mode, rank, world_size, test=False):
         transforms = get_original_vit_image_encoder_transforms(mode)
         if not test:
             dataframe = get_coco_captions_df(annotation_json)
@@ -30,21 +32,31 @@ class CLIPDataLoaderBuilder():
             tokenizer=self._tokenizer,
             transforms=transforms,
         )
+        sampler = torch.utils.data.distributed.DistributedSampler(
+            dataset, 
+            num_replicas=world_size, 
+            rank=dist.get_rank(),
+            shuffle=True if mode == "train" else False)
         dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=self._batch_size, num_workers=self._num_workers,
-            shuffle=True if mode == "train" else False)
-        return dataloader
+            pin_memory = self._pin_memory,
+            shuffle=sampler is None,
+            sampler=sampler)
+        return dataloader, sampler
 
 class GCC3MDataLoaderBuilder():
 
-    def __init__(self, cfg, tokenizer, batch_size, num_workers):
+    def __init__(self, cfg, tokenizer):
         self._tokenizer = tokenizer
-        self._batch_size = batch_size
-        self._num_workers = num_workers
-        self._max_length = cfg.text_aug.max_seq_len
         self._cfg = cfg
+        self._batch_size = cfg.batch_size
+        self._num_workers = cfg.num_workers
+        self._pin_memory = cfg.pin_memory
+        self._max_length = cfg.text_aug.max_seq_len
+        self._shuffle_buffer = cfg.shuffle_buffer
+        self._distributed = True
 
-    def __call__(self, mode, test=False):
+    def __call__(self, mode, rank, world_size, test=False):
 
         transforms = get_original_vit_image_encoder_transforms(mode)
 
@@ -71,21 +83,36 @@ class GCC3MDataLoaderBuilder():
             total_length += length
         print(f'Found {len(tar_file_list)} files in total for split {mode}')
 
-        dataset = wds.WebDataset(tar_file_list)
+        dataset = wds.WebDataset(tar_file_list, shardshuffle=True, nodesplitter=wds.split_by_node)
+        dataset = dataset.shuffle(self._shuffle_buffer)
         dataset = dataset.decode('pil')
         dataset = dataset.rename(image='jpg;png;jpeg', text='text;txt', keep=False)
+        dataset = dataset.map_dict(image=transforms, text=self._text_transform)
+        # dataset = dataset.with_length(total_length)
 
-        dataset = dataset.map_dict(
-            image=transforms,
-            text=self._text_transform
-            )
-        dataset = dataset.with_length(total_length)
+        dataloader = wds.WebLoader(dataset, batch_size=None, shuffle=False, num_workers=self._num_workers, pin_memory=self._pin_memory)
+        dataloader = dataloader.shuffle(7) # shuffle across the loader workers
+        if self._distributed:
+            dataloader = dataloader.batched(batchsize=self._batch_size, collation_fn=self._collate_cb, partial=False)
+        else:
+            dataloader = dataloader.batched(batchsize=self._batch_size, collation_fn=self._collate_cb)
 
-        dataloader = torch.utils.data.DataLoader(
-            dataset, batch_size=self._batch_size, num_workers=self._num_workers,
-            shuffle=False, # invalid shuffle for webdata
-            collate_fn=self._collate_cb)
-        return dataloader
+        # [NOTE] The following codes are from https://github.com/tmbdev-archive/webdataset-examples/blob/master/main-wds.py#L324-L335
+        if self._distributed:
+            # With DDP, we need to make sure that all nodes get the same number of batches;
+            # we do that by reusing a little bit of data.
+            # Note that you only need to do this when retrofitting code that depends on
+            # epoch size. A better way is to iterate through the entire dataset on all nodes.
+            num_batches = max(1, total_length // (self._batch_size * world_size))
+            print("# batches per node = ", num_batches)
+            dataloader.length = num_batches
+            dataloader = dataloader.with_length(num_batches)
+
+            dataloader = dataloader.repeat(nbatches=num_batches)
+            dataloader = dataloader.slice(num_batches)
+            # This only sets the value returned by the len() function; nothing else uses it,
+            # but some frameworks care about it.
+        return dataloader, None
 
     def _collate_cb(self, batch):
         images = list()

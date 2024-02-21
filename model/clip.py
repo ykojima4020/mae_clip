@@ -1,6 +1,9 @@
 import torch
+import torch.distributed as dist
 from torch import nn
 import torch.nn.functional as F
+
+import diffdist.functional as diff_dist
 
 class CLIP(nn.Module):
     def __init__(self, image_encoder, text_encoder, image_projection, text_projection, temperature=0.07):
@@ -10,8 +13,8 @@ class CLIP(nn.Module):
         self._image_projection = image_projection
         self._text_projection = text_projection
         self._temperature = 0.07
-        # self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / self._temperature))
         self.logit_scale = nn.Parameter(torch.ones([]) *  self._temperature)
+        self.cross_entropy = nn.CrossEntropyLoss()
 
     def image_encode(self, image):
         # Getting Image and Text Features
@@ -24,44 +27,49 @@ class CLIP(nn.Module):
         text_embeddings = self._text_projection(text_features)
         return text_embeddings
 
-    def loss(self, image_embeddings, text_embeddings):
-        # Calculating the Loss
-        logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
+    def loss(self, image_x, text_x):
+        batch_size = image_x.shape[0]
+        # get label globally
+        labels = torch.arange(batch_size, dtype=torch.long, device=image_x.device) + batch_size * dist.get_rank()
 
         # [B, C]
-        image_embeddings = F.normalize(image_embeddings, dim=-1)
-        text_embeddings = F.normalize(text_embeddings, dim=-1)
+        image_x = F.normalize(image_x, dim=-1)
+        text_x = F.normalize(text_x, dim=-1)
 
-        logits = (text_embeddings @ image_embeddings.T) * logit_scale
+        logits_per_img = image_x @ dist_collect(text_x).t()
+        logits_per_text = text_x @ dist_collect(image_x).t()
 
-        images_similarity = image_embeddings @ image_embeddings.T
-        texts_similarity = text_embeddings @ text_embeddings.T
-        targets = F.softmax(
-            ((images_similarity + texts_similarity) / 2) * logit_scale, dim=-1
-        )
-        texts_loss = cross_entropy(logits, targets, reduction='none')
-        images_loss = cross_entropy(logits.T, targets.T, reduction='none')
-        loss =  (images_loss + texts_loss) / 2.0 # shape: (batch_size)
-        return loss.mean(), logit_scale
+        logit_scale = torch.clamp(self.logit_scale.exp(), max=100)
+        loss_img = self.cross_entropy(logits_per_img * logit_scale, labels)
+        loss_text = self.cross_entropy(logits_per_text * logit_scale, labels)
+
+        loss = 0.5 * (loss_img + loss_text)
+        return loss, logit_scale
+
 
     def forward(self, batch):
-        image_embeddings = self.image_encode(batch['image'])
-        text_embeddings = self.text_encode(batch['input_ids'], batch['attention_mask'])
+        image_x = self.image_encode(batch['image'])
+        text_x = self.text_encode(batch['input_ids'], batch['attention_mask'])
+        loss, logit_scale = self.loss(image_x, text_x)
 
-        # Calculating the Loss
-        loss = self.loss(image_embeddings, text_embeddings)
-        return loss
+        return loss, logit_scale
 
     def get_transforms(self, mode):
         return self._image_encoder.get_transforms(mode)
 
-def cross_entropy(preds, targets, reduction='none'):
-    log_softmax = nn.LogSoftmax(dim=-1)
-    loss = (-targets * log_softmax(preds)).sum(1)
-    if reduction == "none":
-        return loss
-    elif reduction == "mean":
-        return loss.mean()
+#[NOTE]: https://github.com/NVlabs/GroupViT/blob/main/models/multi_label_contrastive.py#L24C1-L34C51
+def dist_collect(x):
+    """ collect all tensor from all GPUs
+    args:
+        x: shape (mini_batch, ...)
+    returns:
+        shape (mini_batch * num_gpu, ...)
+    """
+    x = x.contiguous()
+    out_list = [torch.zeros_like(x, device=x.device, dtype=x.dtype).contiguous() for _ in range(dist.get_world_size())]
+    out_list = diff_dist.all_gather(out_list, x)
+    return torch.cat(out_list, dim=0).contiguous()
+
 
 if __name__ == '__main__':
     images = torch.randn(8, 3, 224, 224)
