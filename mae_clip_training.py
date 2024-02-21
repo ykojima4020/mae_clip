@@ -120,7 +120,10 @@ def main(rank, world_size, cfg):
     if cfg.checkpoint.resume:
         max_metrics = load_checkpoint(cfg, model_without_ddp, optimizer, lr_scheduler)
         print(max_metrics)
-        # [TODO]: load vest values (ACC Top1, Top5)
+        best_loss = max_metrics['val_loss']
+        best_acc_1 = max_metrics['acc_1']
+        best_acc_5 = max_metrics['acc_5']
+    print(best_loss, best_acc_5, best_acc_1)
 
     logger.info('Start training')
     for epoch in range(cfg.train.start_epoch, cfg.train.epochs):
@@ -138,24 +141,25 @@ def main(rank, world_size, cfg):
             valid_stats, table = validater(ddp_model)
             stats = stats | valid_stats
 
+        # [NOTE]: evaluation and saving
         if dist.get_rank() == 0:
             eval_stats = evaluator(ddp_model.module.clip)
             stats = stats | eval_stats
-
-        # [NOTE]: in this case, Zero-Shot top1 accuracy is used as the metric for saving the models.
-        # [TODO]: This metric should be flexible.
-        if stats['eval']['imagenet']['top1'] > best_acc_1 and dist.get_rank() == 0:
-            best_acc_1 = stats['eval']['imagenet']['top1']
-            save_checkpoint(cfg, epoch, model_without_ddp, {
-                'val_loss': stats['valid']['loss'],
-                'acc_1': stats['eval']['imagenet']['top1'],
-                'acc_5': stats['eval']['imagenet']['top5']
-            }, optimizer, lr_scheduler)
-            logger.info("Saved Best Model!")
+            # [NOTE]: in this case, Zero-Shot top1 accuracy is used as the metric for saving the models.
+            # [TODO]: This metric should be flexible.
+            if stats['eval']['imagenet']['top1'] > best_acc_1:
+                best_acc_1 = stats['eval']['imagenet']['top1']
+                save_checkpoint(cfg, epoch, model_without_ddp, {
+                    'val_loss': stats['valid']['loss'],
+                    'acc_1': stats['eval']['imagenet']['top1'],
+                    'acc_5': stats['eval']['imagenet']['top5']
+                }, optimizer, lr_scheduler)
+                logger.info("Saved Best Model!")
 
         if cfg.wandb and dist.get_rank() == 0:
             wandb.log(stats)
             wandb.log({'image': table})
+        dist.barrier()
 
     if cfg.wandb and dist.get_rank() == 0:
         run.finish()
