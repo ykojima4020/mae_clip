@@ -8,11 +8,12 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
+import open_clip
 
 from transformers import DistilBertTokenizer
 from omegaconf import OmegaConf, read_write
 
-from factory import MAECLIPFactory
+from factory import MAECLIPFactory, PretrainedOpenCLIPFactory
 from data.dataloader_builder import CLIPDataLoaderBuilder, GCC3MDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
@@ -76,11 +77,16 @@ def main(rank, world_size, cfg):
     # [NOTE]: waiting wandb init
     dist.barrier()
 
-    tokenizer = DistilBertTokenizer.from_pretrained(cfg.model.text.encoder.name)
-    factory = MAECLIPFactory(cfg.model)
+    # [TODO]: tokenizer should be created in the process of building model and align the interface
+    #         We need wrap class for tokenizer
+    # tokenizer = DistilBertTokenizer.from_pretrained(cfg.model.text.encoder.name)
+    tokenizer = open_clip.get_tokenizer('ViT-B-16')
+
+    # factory = MAECLIPFactory(cfg.model)
+    factory = PretrainedOpenCLIPFactory(cfg.model)
 
     model = factory.create().to(rank)
-    ddp_model = DDP(model, device_ids=[rank])
+    ddp_model = DDP(model, find_unused_parameters=True, device_ids=[rank])
     model_without_ddp = ddp_model.module
 
     dataloader_builder = CLIPDataLoaderBuilder(cfg.data, tokenizer)

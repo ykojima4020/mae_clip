@@ -8,6 +8,8 @@ from model.modules import TextEncoder, ProjectionHead
 
 from model.models_rils import RILSMAEEncoder, RILSMAEDecoder
 
+from model.open_clip import OpenCLIP
+
 class MAECLIP(nn.Module):
     def __init__(self, cfg):
         super().__init__()
@@ -99,3 +101,14 @@ class RILSMAECLIP(nn.Module):
         total_loss = clip_loss + self._alpha * mae_loss
         return total_loss, clip_loss, mae_loss, predicted_img, logit_scale
 
+class PretrainedOpenMAECLIP(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.clip = OpenCLIP()
+
+    def forward(self, batch):
+        clip_loss, logit_scale = self.clip(batch)
+        total_loss = clip_loss
+        mae_loss = torch.tensor(float('inf'))
+
+        return total_loss, clip_loss, mae_loss, batch['image'], logit_scale

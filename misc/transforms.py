@@ -1,4 +1,5 @@
 import timm
+import open_clip
 
 def get_original_vit_image_encoder_transforms(mode):
     # the following data_config is given by OriginalViTImageEncoder
@@ -14,3 +15,10 @@ def get_original_vit_image_encoder_transforms(mode):
     else:
         return timm.data.create_transform(**data_config, is_training=False)
 
+def get_open_clip_vitb16_transforms(mode):
+    _, train, val = open_clip.create_model_and_transforms('ViT-B-16', pretrained='laion2b_s34b_b88k')
+    print('open_clip transforms loaded.')
+    if mode == "train":
+        return train
+    else:
+        return val

@@ -18,15 +18,20 @@ class CLIPDataset(torch.utils.data.Dataset):
         self.image_filenames = image_filenames
         self.captions = list(captions)
         max_length = 200 
-        self.encoded_captions = tokenizer(
-            list(captions), padding=True, truncation=True, max_length=max_length)
+        # [NOTE]: different tokenizer interface 
+        # self.encoded_captions = tokenizer(
+        #     list(captions), padding=True, truncation=True, max_length=max_length)
+        self.encoded_captions = tokenizer(list(captions))
         self.transforms = transforms
 
     def __getitem__(self, idx):
+        '''
         item = {
             key: torch.tensor(values[idx])
             for key, values in self.encoded_captions.items()
         }
+        '''
+        item = {'text': self.encoded_captions[idx]}
 
         # image = cv2.imread(f"{CFG.image_path}/{self.image_filenames[idx]}")
         # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

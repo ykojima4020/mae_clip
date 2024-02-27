@@ -1,7 +1,7 @@
 from model.clip import CLIP
 from model.modules import ViTImageEncoder, TextEncoder, ProjectionHead
 from model.mae import MAE_Encoder 
-from model.mae_clip import MAECLIP, RILSMAECLIP
+from model.mae_clip import MAECLIP, RILSMAECLIP, PretrainedOpenMAECLIP
 
 class Factory:
     def __init__(self, cfg):
@@ -49,4 +49,12 @@ class MAECLIPFactory(Factory):
     def create(self):
         # return MAECLIP(self._cfg)
         return RILSMAECLIP(self._cfg)
+
+class PretrainedOpenCLIPFactory(Factory):
+
+    def __init__(self, cfg):
+        self._cfg = cfg
+
+    def create(self):
+        return PretrainedOpenMAECLIP(self._cfg)
 
