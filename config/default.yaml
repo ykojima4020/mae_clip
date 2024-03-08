@@ -79,3 +79,4 @@ seed: 0
 wandb: false
 device: 'cuda'
 world_size: 1
+type: 'normal'

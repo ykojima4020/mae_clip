@@ -4,7 +4,6 @@ import torch
 import torch.distributed as dist
 
 from data.dataset import CLIPDataset
-from misc.transforms import get_original_vit_image_encoder_transforms, get_open_clip_vitb16_transforms
 from misc.coco_captions_to_df import get_coco_captions_df, get_coco_captions_test_df
 
 from braceexpand import braceexpand
@@ -12,16 +11,14 @@ import webdataset as wds
 
 class CLIPDataLoaderBuilder():
 
-    def __init__(self, cfg, tokenizer):
+    def __init__(self, cfg, tokenizer, transform):
         self._tokenizer = tokenizer
         self._batch_size = cfg.batch_size
         self._num_workers = cfg.num_workers
         self._pin_memory = cfg.pin_memory
+        self._transform = transform
 
     def __call__(self, image_path, annotation_json, mode, rank, world_size, test=False):
-        # [TODO]: there's dependency of transforms which should be taken as input
-        # transforms = get_original_vit_image_encoder_transforms(mode)
-        transforms = get_open_clip_vitb16_transforms(mode)
         if not test:
             dataframe = get_coco_captions_df(annotation_json)
         else:
@@ -32,7 +29,7 @@ class CLIPDataLoaderBuilder():
             dataframe["image"].values,
             dataframe["caption"].values,
             tokenizer=self._tokenizer,
-            transforms=transforms,
+            transforms=self._transform(mode),
         )
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset, 
@@ -48,7 +45,7 @@ class CLIPDataLoaderBuilder():
 
 class GCC3MDataLoaderBuilder():
 
-    def __init__(self, cfg, tokenizer):
+    def __init__(self, cfg, tokenizer, transform):
         self._tokenizer = tokenizer
         self._cfg = cfg
         self._batch_size = cfg.batch_size
@@ -57,12 +54,9 @@ class GCC3MDataLoaderBuilder():
         self._max_length = cfg.text_aug.max_seq_len
         self._shuffle_buffer = cfg.shuffle_buffer
         self._distributed = True
+        self._transform = transform
 
     def __call__(self, mode, rank, world_size, test=False):
-
-        # transforms = get_original_vit_image_encoder_transforms(mode)
-        transforms = get_open_clip_vitb16_transforms(mode)
-
         dataset_type = None
         tar_file_list = []
         total_length = 0
@@ -90,13 +84,13 @@ class GCC3MDataLoaderBuilder():
         dataset = dataset.shuffle(self._shuffle_buffer)
         dataset = dataset.decode('pil')
         dataset = dataset.rename(image='jpg;png;jpeg', text='text;txt', keep=False)
-        dataset = dataset.map_dict(image=transforms, text=self._text_transform)
+        dataset = dataset.map_dict(image=self._transform(mode), text=self._text_transform)
         # dataset = dataset.with_length(total_length)
 
         dataloader = wds.WebLoader(dataset, batch_size=None, shuffle=False, num_workers=self._num_workers, pin_memory=self._pin_memory)
         dataloader = dataloader.shuffle(7) # shuffle across the loader workers
         if self._distributed:
-            dataloader = dataloader.batched(batchsize=self._batch_size, collation_fn=self._collate_cb_for_open_clip, partial=False)
+            dataloader = dataloader.batched(batchsize=self._batch_size, collation_fn=self._collate_cb, partial=False)
         else:
             dataloader = dataloader.batched(batchsize=self._batch_size, collation_fn=self._collate_cb)
 
@@ -124,32 +118,15 @@ class GCC3MDataLoaderBuilder():
     
         for b in batch:
             images.append(b['image'])
-            input_ids.append(b['text']['input_ids'])
-            attention_masks.append(b['text']['attention_mask'])
+            input_ids.append(b['text']['input_ids'][0])
+            attention_masks.append(b['text']['attention_mask'][0])
 
         images = torch.stack(images, dim=0)
-        input_ids = torch.tensor(input_ids, dtype=torch.int64)
-        attention_masks = torch.tensor(attention_masks, dtype=torch.int64)
-
+        input_ids = torch.stack(input_ids)
+        attention_masks = torch.stack(attention_masks)
         return {'image': images, 'input_ids': input_ids, 'attention_mask': attention_masks} 
-
-    def _collate_cb_for_open_clip(self, batch):
-        # print(batch[0]['text'].shape)
-        images = list()
-        texts = list()
-    
-        for b in batch:
-            images.append(b['image'])
-            texts.append(b['text'][0])
-
-        images = torch.stack(images, dim=0)
-        texts = torch.stack(texts, dim=0)
-
-        return {'image': images, 'text': texts} 
-
 
     def _text_transform(self, x):
         # [NOTE]: truncation cut the sequence in a fixed size.
-        # encode = self._tokenizer(x, padding="max_length", truncation=True, max_length=self._max_length)
-        encode = self._tokenizer(x)
+        encode = self._tokenizer(x, padding="max_length", truncation=True, max_length=self._max_length)
         return encode

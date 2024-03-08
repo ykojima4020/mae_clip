@@ -54,35 +54,7 @@ def get_config(args):
     if hasattr(args, 'epochs') and args.epochs:
         cfg.train.epochs = args.epochs
 
-    '''
-    if hasattr(args, 'amp_opt_level') and args.amp_opt_level:
-        cfg.train.amp_opt_level = args.amp_opt_level
-
-    if hasattr(args, 'resume') and args.resume:
-        cfg.checkpoint.resume = args.resume
-
-    if hasattr(args, 'eval') and args.eval:
-        cfg.evaluate.eval_only = args.eval
-
-    if hasattr(args, 'keep') and args.keep:
-        cfg.checkpoint.max_kept = args.keep
-
-    if not cfg.model_name:
-        cfg.model_name = osp.splitext(osp.basename(args.cfg))[0]
-
-    world_size = int(os.environ.get('WORLD_SIZE', 1))
-    cfg.model_name = cfg.model_name + f'_bs{cfg.data.batch_size}x{world_size}'
-
-    if hasattr(args, 'tag') and args.tag:
-        cfg.tag = args.tag
-        cfg.output = osp.join(cfg.output, cfg.tag)
-
-    if hasattr(args, 'vis') and args.vis:
-        cfg.vis = args.vis
-    '''
-
-    # cfg.local_rank = args.local_rank
-
-    # OmegaConf.set_readonly(cfg, True)
+    if hasattr(args, 'type') and args.type:
+        cfg.type = args.type
 
     return cfg

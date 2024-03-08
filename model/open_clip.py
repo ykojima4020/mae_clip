@@ -7,14 +7,71 @@ import diffdist.functional as diff_dist
 
 import open_clip
 
-class OpenCLIP(nn.Module):
-    def __init__(self, image_encoder=None, text_encoder=None, image_projection=None, text_projection=None, temperature=0.07):
+from einops import rearrange
+
+class OpenCLIPImageEncoder(nn.Module):
+
+    def __init__(self, model):
         super().__init__()
-        self._temperature = 0.07
+        if not isinstance(model, open_clip.model.CLIP):
+            raise TypeError
+
+        self.patchify = model.visual.conv1
+        self.cls_token = model.visual.class_embedding          # torch.Size([768])
+        self.pos_embedding = model.visual.positional_embedding # torch.Size([197, 768]) 
+        self.transformer = model.visual.transformer
+        self.ln_pre = model.visual.ln_pre
+        self.ln_post = model.visual.ln_post
+
+        self.proj = model.visual.proj
+
+    def forward(self, x, shuffler=None): 
+        x = self.patchify(x)				# torch.Size([B, 768, 14, 14]) 
+        x = rearrange(x, 'b c h w -> b (h w) c')	# torch.Size([B, 196, 768])
+        x = x + self.pos_embedding[1:]
+
+        if shuffler:
+             x = rearrange(x, 'b t c -> t b c')
+             x, forward_indexes, backward_indexes = shuffler(x)
+             x = rearrange(x, 't b c -> b t c')
+        else:
+             backward_indexes = None
+
+        cls_token_pos = self.cls_token + self.pos_embedding[0]	# torch.Size([768])
+        x = torch.cat([cls_token_pos.expand(x.shape[0], 1, -1), x], dim=1) # torch.Size([B, 197, 768])
+
+        x = self.ln_pre(x)
+
+        x = rearrange(x, 'b t c -> t b c')		# torch.Size([197, B, 768])
+        x = self.transformer(x)
+        x = rearrange(x, 't b c -> b t c')
+        x = self.ln_post(x)			# NLD
+
+        x = rearrange(x, 'b t c -> t b c')
+        return x, backward_indexes
+
+class OpenCLIPImageProjector(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        if not isinstance(model, open_clip.model.CLIP):
+            raise TypeError
+        self.proj = model.visual.proj
+
+    def forward(self, x):
+        return x @ self.proj
+
+class OpenCLIP(nn.Module):
+    def __init__(self, image_encoder=None, image_projector=None, clip=None, temperature=0.07):
+        super().__init__()
+        if not isinstance(clip, open_clip.model.CLIP):
+            raise TypeError
+        self._image_encoder = image_encoder
+        self._image_projector = image_projector
+        self.clip = clip
+
+        self._temperature = temperature
         self.logit_scale = nn.Parameter(torch.ones([]) *  self._temperature)
         self.cross_entropy = nn.CrossEntropyLoss()
-        self._model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-16', pretrained='laion2b_s34b_b88k')
-        print('open_clip model loaded.')
 
     def loss(self, image_x, text_x):
         batch_size = image_x.shape[0]
@@ -37,19 +94,22 @@ class OpenCLIP(nn.Module):
 
     def image_encode(self, image):
         # Getting Image and Text Features
-        image_x = self._model.encode_image(image)
-        return image_x 
+        image_features = self._image_encoder(image)[0][0, :, :]
+        image_embeddings = self._image_projector(image_features)
+        return image_embeddings 
 
-    def text_encode(self, text):
-        text_x = self._model.encode_text(text)
+    def text_encode(self, input_ids, attention_mask=None):
+        text_x = self.clip.encode_text(input_ids)
         return text_x
 
     def forward(self, batch):
         image_x = self.image_encode(batch['image'])
-        text_x = self.text_encode(batch['text'])
+        text_x = self.text_encode(batch['input_ids'])
         loss, logit_scale = self.loss(image_x, text_x)
 
         return loss, logit_scale
+
+
 
 #[NOTE]: https://github.com/NVlabs/GroupViT/blob/main/models/multi_label_contrastive.py#L24C1-L34C51
 def dist_collect(x):
@@ -63,16 +123,5 @@ def dist_collect(x):
     out_list = [torch.zeros_like(x, device=x.device, dtype=x.dtype).contiguous() for _ in range(dist.get_world_size())]
     out_list = diff_dist.all_gather(out_list, x)
     return torch.cat(out_list, dim=0).contiguous()
-
-
-if __name__ == '__main__':
-    images = torch.randn(8, 3, 224, 224)
-    input_ids = torch.randint(5, 300, size=(8, 25))
-    attention_mask = torch.ones(8, 25)
-    batch = {
-        'image': images,
-        'input_ids': input_ids,
-        'attention_mask': attention_mask
-    }
 
 

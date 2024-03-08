@@ -136,7 +136,6 @@ class MAE_ViT(torch.nn.Module):
         super().__init__()
 
         self._shuffler = PatchShuffle(mask_ratio)
-
         self.encoder = encoder 
         self.decoder = decoder
 
@@ -145,46 +144,3 @@ class MAE_ViT(torch.nn.Module):
         predicted_img, mask = self.decoder(features,  backward_indexes)
         return predicted_img, mask
 
-class ViT_Classifier(torch.nn.Module):
-    def __init__(self, encoder : MAE_Encoder, num_classes=10) -> None:
-        super().__init__()
-        self.cls_token = encoder.cls_token
-        self.pos_embedding = encoder.pos_embedding
-        self.patchify = encoder.patchify
-        self.transformer = encoder.transformer
-        self.layer_norm = encoder.layer_norm
-        self.head = torch.nn.Linear(self.pos_embedding.shape[-1], num_classes)
-
-    def forward(self, img):
-        patches = self.patchify(img)
-        patches = rearrange(patches, 'b c h w -> (h w) b c')
-        patches = patches + self.pos_embedding
-        patches = torch.cat([self.cls_token.expand(-1, patches.shape[1], -1), patches], dim=0)
-        patches = rearrange(patches, 't b c -> b t c')
-        features = self.layer_norm(self.transformer(patches))
-        features = rearrange(features, 'b t c -> t b c')
-        logits = self.head(features[0])
-        return logits
-
-"""
-if __name__ == '__main__':
-    shuffle = PatchShuffle(0.75)
-    a = torch.rand(16, 2, 10) # [patches, B, embeddings]
-    b, forward_indexes, backward_indexes = shuffle(a)
-    print('input.shape: ', a.shape)
-    print('after shuffle: ', b.shape)  # torch.Size([4, 2, 10])
-    print('forward_indexes: ', forward_indexes.shape)  # torch.Size([16, 2])
-    print('backward_indexes: ', backward_indexes.shape)  # torch.Size([16, 2])
-
-    print('forward_indexes: ', forward_indexes)
-    print('backward_indexes', backward_indexes)
-
-    img = torch.rand(2, 3, 32, 32)
-    encoder = MAE_Encoder()
-    decoder = MAE_Decoder()
-    features, backward_indexes = encoder(img)
-    predicted_img, mask = decoder(features, backward_indexes)
-    print(predicted_img.shape)
-    loss = torch.mean((predicted_img - img) ** 2 * mask / 0.75)
-    print(loss)
-"""

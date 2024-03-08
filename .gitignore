@@ -5,3 +5,5 @@ tmp/
 .ipynb_checkpoints/
 wandb/
 dataset/
+ImageNetV2-matched-frequency/
+ImageNetV2-matched-frequency.tar.gz
