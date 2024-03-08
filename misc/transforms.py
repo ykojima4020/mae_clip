@@ -1,11 +1,11 @@
-import timm
-import open_clip
 
 import torchvision.transforms as transforms
+import timm
+import open_clip
 import numpy as np
 
 import sys
-sys.path.append('./external/robustness/ImageNet-C/imagenet_c')
+sys.path.append('../external/robustness/ImageNet-C/imagenet_c')
 from imagenet_c import corrupt
 
 def get_original_vit_image_encoder_transforms(mode):
@@ -59,4 +59,3 @@ def get_corruption_transform(corruption):
 
     # [NOTE]: this is open_clip transform
     # Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
-

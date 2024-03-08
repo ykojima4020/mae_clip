@@ -20,10 +20,8 @@ class ZeroShotImageNetEvaluator(Evaluator):
         self._imagenet_classes = imagenet_config.imagenet_classes
         self._imagenet_templates = imagenet_config.imagenet_templates
 
-        # [TODO]: https://github.com/ykojima4020/mae_clip/issues/21
         if transform is None:
-            # transform = get_original_vit_image_encoder_transforms('valid')
-            transform = get_open_clip_vitb16_transforms('valid')
+            transform = get_original_vit_image_encoder_transforms('valid')
         dataset = ImageNetV2Dataset(transform=transform)
         self._loader = torch.utils.data.DataLoader(dataset, batch_size=32, num_workers=2)
         self._device = device
@@ -38,9 +36,6 @@ class ZeroShotImageNetEvaluator(Evaluator):
                 tokens = self._tokenizer(texts, padding=True, truncation=True, max_length=max_length)
                 batch = {key: values.to(self._device) for key, values in tokens.items()}
                 class_embeddings = model.text_encode(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]) #embed with text encoder
-                # print(class_embeddings.shape) # the shape is [80, 256]
-                # print(class_embeddings.norm(dim=-1, keepdim=True).shape) # the shape is torch.Size([80, 1])
-                # print(class_embeddings.mean(dim=0).shape) # the shape is torch.Size([256])
                 class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True) # the norm shape is torch.Size([80, 1])
                 class_embedding = class_embeddings.mean(dim=0) # the mean shape is torch.Size([256])
                 class_embedding /= class_embedding.norm()
