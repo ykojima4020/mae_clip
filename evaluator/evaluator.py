@@ -3,7 +3,7 @@ from tqdm import tqdm
 
 from evaluator import imagenet_config
 from imagenetv2_pytorch import ImageNetV2Dataset
-from misc.transforms import get_original_vit_image_encoder_transforms
+from misc.transforms import get_original_vit_image_encoder_transforms, get_open_clip_vitb16_transforms
 
 class Evaluator():
 
@@ -15,13 +15,14 @@ class Evaluator():
 
 class ZeroShotImageNetEvaluator(Evaluator):
 
-    def __init__(self, tokenizer, device):
+    def __init__(self, tokenizer, device, transform=None):
         self._tokenizer = tokenizer
         self._imagenet_classes = imagenet_config.imagenet_classes
         self._imagenet_templates = imagenet_config.imagenet_templates
 
-        transforms = get_original_vit_image_encoder_transforms('valid')
-        dataset = ImageNetV2Dataset(transform=transforms)
+        if transform is None:
+            transform = get_original_vit_image_encoder_transforms('valid')
+        dataset = ImageNetV2Dataset(transform=transform)
         self._loader = torch.utils.data.DataLoader(dataset, batch_size=32, num_workers=2)
         self._device = device
 
@@ -32,12 +33,9 @@ class ZeroShotImageNetEvaluator(Evaluator):
                 # 80 patterns per class
                 texts = [template.format(classname) for template in templates] #format with class
                 max_length = 15
-                texts = self._tokenizer(texts, padding=True, truncation=True, max_length=max_length)
-                batch = {key: torch.tensor(values).to(self._device) for key, values in texts.items()}
+                tokens = self._tokenizer(texts, padding=True, truncation=True, max_length=max_length)
+                batch = {key: values.to(self._device) for key, values in tokens.items()}
                 class_embeddings = model.text_encode(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]) #embed with text encoder
-                # print(class_embeddings.shape) # the shape is [80, 256]
-                # print(class_embeddings.norm(dim=-1, keepdim=True).shape) # the shape is torch.Size([80, 1])
-                # print(class_embeddings.mean(dim=0).shape) # the shape is torch.Size([256])
                 class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True) # the norm shape is torch.Size([80, 1])
                 class_embedding = class_embeddings.mean(dim=0) # the mean shape is torch.Size([256])
                 class_embedding /= class_embedding.norm()

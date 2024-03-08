@@ -8,11 +8,11 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
+import open_clip
 
-from transformers import DistilBertTokenizer
 from omegaconf import OmegaConf, read_write
 
-from factory import MAECLIPFactory
+from factory import RILSMAECLIPFactory, PretrainedOpenCLIPFactory
 from data.dataloader_builder import CLIPDataLoaderBuilder, GCC3MDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
@@ -28,8 +28,8 @@ from misc.optimizer import build_optimizer
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
     parser.add_argument('--cfg', type=str, required=True, help='path to a config file')
+    parser.add_argument('--type', default='normal', choices=['normal', 'open'], help='a kind of archtectures')
     parser.add_argument('--opts', help="Modify config options by adding 'KEY=VALUE' list. ", default=None, nargs='+')
-
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--wandb', action='store_true')
 
@@ -37,15 +37,6 @@ def get_args_parser():
     parser.add_argument('--epochs', type=int)
     parser.add_argument('--device', type=str)
 
-    # Dataset parameters
-    parser.add_argument('--train_image_path', default='./dataset/coco/',
-                        help='path to the training images')
-    parser.add_argument('--train_json', default='/home/ykojima/dataset/coco/annotations/captions_train2014.json',
-                        help='training annotation json')
-    parser.add_argument('--val_image_path', default='./dataset/coco/',
-                        help='path to the validation images')
-    parser.add_argument('--val_json', default='/home/ykojima/dataset/coco/annotations/captions_val2014.json',
-                        help='validation annotation json')
     parser.add_argument('--output', default='./tmp',
                         help='path where to save, empty for no saving')
     return parser
@@ -76,15 +67,28 @@ def main(rank, world_size, cfg):
     # [NOTE]: waiting wandb init
     dist.barrier()
 
-    tokenizer = DistilBertTokenizer.from_pretrained(cfg.model.text.encoder.name)
-    factory = MAECLIPFactory(cfg.model)
+    if cfg.type == 'normal':
+        factory = RILSMAECLIPFactory(cfg.model)
+    elif cfg.type == 'open':
+        factory = PretrainedOpenCLIPFactory(cfg.model)
+    else:
+        raise TypeError
 
-    model = factory.create().to(rank)
+    model, tokenizer, transform = factory.create()
+    model = model.to(rank)
+
+    for name, param in model.named_parameters():
+        if 'decoder' in name:
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
+        print(name, param.requires_grad)
+
     ddp_model = DDP(model, device_ids=[rank])
     model_without_ddp = ddp_model.module
 
-    dataloader_builder = CLIPDataLoaderBuilder(cfg.data, tokenizer)
-    gcc3m_dataloader_builder = GCC3MDataLoaderBuilder(cfg.data, tokenizer)
+    dataloader_builder = CLIPDataLoaderBuilder(cfg.data, tokenizer, transform)
+    gcc3m_dataloader_builder = GCC3MDataLoaderBuilder(cfg.data, tokenizer, transform)
 
     train_loader, train_sampler = gcc3m_dataloader_builder('train', rank, world_size, test=cfg.test)
 
@@ -147,10 +151,10 @@ def main(rank, world_size, cfg):
             stats = stats | eval_stats
             # [NOTE]: in this case, Zero-Shot top1 accuracy is used as the metric for saving the models.
             # [TODO]: This metric should be flexible.
-            if stats['eval']['imagenet']['top1'] > best_acc_1:
-                best_acc_1 = stats['eval']['imagenet']['top1']
+            if stats['valid']['mae_loss'] < best_loss:
+                # best_acc_1 = stats['eval']['imagenet']['top1']
                 save_checkpoint(cfg, epoch, model_without_ddp, {
-                    'val_loss': stats['valid']['loss'],
+                    'val_loss': stats['valid']['mae_loss'],
                     'acc_1': stats['eval']['imagenet']['top1'],
                     'acc_5': stats['eval']['imagenet']['top5']
                 }, optimizer, lr_scheduler)

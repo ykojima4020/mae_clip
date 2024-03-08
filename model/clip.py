@@ -12,7 +12,7 @@ class CLIP(nn.Module):
         self._text_encoder = text_encoder
         self._image_projection = image_projection
         self._text_projection = text_projection
-        self._temperature = 0.07
+        self._temperature = temperature
         self.logit_scale = nn.Parameter(torch.ones([]) *  self._temperature)
         self.cross_entropy = nn.CrossEntropyLoss()
 
