@@ -1,0 +1,27 @@
+program: simple_ttt.py
+method: 'random'
+metric:
+  name: 'top5'
+  goal: 'maximize'
+parameters:
+  lr_scale:
+    values: [1e1, 1, 1e-1, 1e-2, 1e-3, 1e-4]
+  weight_decay:
+    values: [0.005, 0.05, 0.5, 5]
+  batch_size:
+    values: [256, 128, 64, 32]
+  epochs:
+    values: [1, 5, 10] 
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - "--cfg"
+  - "config/model.yaml"
+  - "--wandb"
+  - "--checkpoint"
+  - "../output/20240304_decoder_layer8_finetune_datacomp_l_s1b-b8k/checkpoint.pth"
+  - "--type"
+  - "open"
+
