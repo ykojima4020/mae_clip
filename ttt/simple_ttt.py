@@ -14,6 +14,7 @@ from omegaconf import OmegaConf
 from imagenetv2_pytorch import ImageNetV2Dataset
 from misc.transforms import Corruption, get_corruption_transform
 
+from misc.utils import AvgMeter
 
 corruptions_name = ['brightness', 'contrast', 'defocus_blur', 'elastic_transform', 'fog',
                     'frost', 'gaussian_noise', 'glass_blur', 'impulse_noise', 'jpeg_compression',
@@ -35,8 +36,9 @@ class TestTimeTrainer():
         self._data_loader = data_loader
         self._optimizer = optimizer
         self._device = device
-
         self._mask_ratio = mask_ratio
+        self._mae_loss_meter = AvgMeter()
+
 
     def __call__(self, model):
         tqdm_object = tqdm(self._data_loader, total=len(self._data_loader))
@@ -49,6 +51,11 @@ class TestTimeTrainer():
             mae_loss.backward() 
             self._optimizer.step()
             self._optimizer.zero_grad()
+
+            count = images.size(0)
+            self._mae_loss_meter.update(mae_loss.item(), count)
+
+        return self._mae_loss_meter.avg
 
 def sweep():
     sweep_config = load_config('ttt_sweep.yaml')
