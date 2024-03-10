@@ -25,6 +25,7 @@ class ZeroShotImageNetEvaluator(Evaluator):
         dataset = ImageNetV2Dataset(transform=transform)
         self._loader = torch.utils.data.DataLoader(dataset, batch_size=32, num_workers=2)
         self._device = device
+        self._zeroshot_weights = None
 
     def _zeroshot_classifier(self, model, classnames, templates):
         with torch.no_grad():
@@ -48,8 +49,9 @@ class ZeroShotImageNetEvaluator(Evaluator):
         correct = pred.eq(target.view(1, -1).expand_as(pred))
         return [float(correct[:k].reshape(-1).float().sum(0, keepdim=True).cpu().numpy()) for k in topk]
  
-    def __call__(self, model):
-        zeroshot_weights = self._zeroshot_classifier(model, self._imagenet_classes, self._imagenet_templates)
+    def __call__(self, model, update=True):
+        if update or (self._zeroshot_weights is None):
+            self._zeroshot_weights = self._zeroshot_classifier(model, self._imagenet_classes, self._imagenet_templates)
         with torch.no_grad():
             top1, top5, n = 0., 0., 0.
             for i, (images, target) in enumerate(tqdm(self._loader)):
@@ -59,7 +61,7 @@ class ZeroShotImageNetEvaluator(Evaluator):
                 # predict
                 image_features = model.image_encode(images)
                 image_features /= image_features.norm(dim=-1, keepdim=True)
-                logits = image_features @ zeroshot_weights
+                logits = image_features @ self._zeroshot_weights
         
                 # measure accuracy
                 acc1, acc5 = self._accuracy(logits, target, topk=(1, 5))
