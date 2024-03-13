@@ -1,17 +1,21 @@
-program: simple_ttt.py
+program: ttt_sweep.py
 method: 'random'
 metric:
-  name: 'top5'
+  name: 'diff_top5'
   goal: 'maximize'
 parameters:
-  lr_scale:
-    values: [1e1, 1, 1e-1, 1e-2, 1e-3, 1e-4]
+  lr:
+    values: [5e-3, 5e-4]
   weight_decay:
-    values: [0.005, 0.05, 0.5, 5]
+    values: [0.2, 0.02]
   batch_size:
-    values: [256, 128, 64, 32]
+    values: [128]
   epochs:
-    values: [1, 5, 10] 
+    values: [1] 
+  optimizer:
+    values: ['sgd'] 
+  layer:
+    values: [-1, 3, 7, 11]
 
 command:
   - ${env}
@@ -24,4 +28,3 @@ command:
   - "../output/20240304_decoder_layer8_finetune_datacomp_l_s1b-b8k/checkpoint.pth"
   - "--type"
   - "open"
-

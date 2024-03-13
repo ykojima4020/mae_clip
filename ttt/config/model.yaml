@@ -1,3 +1,10 @@
+layer: -1
+lr: 5e-3
+weight_decay: 0.2
+batch_size: 128
+epochs: 1
+optimizer: 'sgd'
+
 model:
   image:
     encoder:

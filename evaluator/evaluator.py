@@ -2,8 +2,6 @@ import torch
 from tqdm import tqdm
 
 from evaluator import imagenet_config
-from imagenetv2_pytorch import ImageNetV2Dataset
-from misc.transforms import get_original_vit_image_encoder_transforms, get_open_clip_vitb16_transforms
 
 class Evaluator():
 
@@ -15,14 +13,14 @@ class Evaluator():
 
 class ZeroShotImageNetEvaluator(Evaluator):
 
-    def __init__(self, tokenizer, device, transform=None):
+    def __init__(self, tokenizer, device, dataset):
         self._tokenizer = tokenizer
         self._imagenet_classes = imagenet_config.imagenet_classes
         self._imagenet_templates = imagenet_config.imagenet_templates
 
-        if transform is None:
-            transform = get_original_vit_image_encoder_transforms('valid')
-        dataset = ImageNetV2Dataset(transform=transform)
+        if not isinstance(dataset, torch.utils.data.Dataset):
+            raise TypeError('{} is not supported.'.format(type(dataset)))
+
         self._loader = torch.utils.data.DataLoader(dataset, batch_size=32, num_workers=2)
         self._device = device
         self._zeroshot_weights = None

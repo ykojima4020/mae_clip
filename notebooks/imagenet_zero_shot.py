@@ -13,9 +13,6 @@
 # ---
 
 # %%
-# %reset -f
-
-# %%
 import torch
 
 import sys
@@ -47,11 +44,21 @@ model.load_state_dict(status['model'])
 model.eval()
 
 # %%
-evaluator = ZeroShotImageNetEvaluator(tokenizer, device, transform('valid'))
+from imagenetv2_pytorch import ImageNetV2Dataset
+dataset = ImageNetV2Dataset(transform=transform('valid'))
+
+evaluator = ZeroShotImageNetEvaluator(tokenizer, device, dataset)
 eval_res = evaluator(model.clip, update=False)
 print(eval_res)
 
 # %%
+eval_res = evaluator(model.clip, update=False)
+print(eval_res)
+
+# %%
+import torchvision
+dataset = torchvision.datasets.ImageFolder(root='/home/ykojima/dataset/imagenetv2-c/brightness/5', transform=transform('valid'))
+evaluator = ZeroShotImageNetEvaluator(tokenizer, device, dataset)
 eval_res = evaluator(model.clip, update=False)
 print(eval_res)
 
