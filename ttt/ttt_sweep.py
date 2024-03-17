@@ -11,7 +11,7 @@ import wandb
 sys.path.append('../')
 from ttt import TestTimeTrainer
 from evaluator.evaluator import ZeroShotImageNetEvaluator
-from factory import RILSMAECLIPFactory, PretrainedOpenCLIPFactory
+from factory import RILSMAECLIPFactory, PretrainedOpenCLIPFactory, PretrainedOpenCLIPDecoderEncoderFineTuneFactory
 from misc.config import load_config
 from omegaconf import OmegaConf
 
@@ -64,27 +64,14 @@ def main():
     if args.type == 'normal':
         factory = RILSMAECLIPFactory(config.model)
     elif args.type == 'open':
-        factory = PretrainedOpenCLIPFactory(config.model)
+        # factory = PretrainedOpenCLIPFactory(config.model)
+        factory = PretrainedOpenCLIPDecoderEncoderFineTuneFactory(config.model, mae='feature')
     else:
         raise TypeError
 
     model, tokenizer, _ = factory.create()
     model = model.to(device)
     # [NOTE]: freze CLIP parameters
-    for name, param in model.named_parameters():
-        if ('image_encoder' in name):
-            if ('ln_post' in name):
-                param.requires_grad = True
-            elif ('transformer' in name):
-                names = name.split('.')
-                layer_number = int(names[3])
-                if config.layer >= layer_number:
-                    param.requires_grad = False
-            else:
-                param.requires_grad = False
-        else:
-            param.requires_grad = False
-
     status = torch.load(args.checkpoint, map_location="cuda")
     severity = 5
     transform = transforms.Compose(
@@ -93,11 +80,12 @@ def main():
             transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
             ])
 
+    # [NOTE]: update only image encoder
     if config.optimizer == 'adam':
-        optimizer = torch.optim.AdamW(model.mae.parameters(),
+        optimizer = torch.optim.AdamW(model.image_encoder.parameters(),
                 eps=eps, lr=config.lr, betas=(0.9, 0.95), weight_decay=config.weight_decay)
     elif config.optimizer == 'sgd':
-        optimizer = torch.optim.SGD(model.mae.parameters(), lr=config.lr, weight_decay=config.weight_decay) 
+        optimizer = torch.optim.SGD(model.image_encoder.parameters(), lr=config.lr, weight_decay=config.weight_decay) 
     else:
         raise TypeError
 
@@ -109,7 +97,7 @@ def main():
     for corruption in corruptions_name:
         if corruption == 'frost':
             continue
-        dataset = torchvision.datasets.ImageFolder(root=f'/home/ykojima/dataset/imagenetv2-c/{corruption}/{severity}', transform=transform) 
+        dataset = torchvision.datasets.ImageFolder(root=f'/data2/yuto/dataset/imagenetv2-c/{corruption}/{severity}', transform=transform) 
         top1_before_ttt, top5_before_ttt, top1_after_ttt, top5_after_ttt = run_ttt_improvement(model, tokenizer, dataset, status, optimizer, epochs=config.epochs, batch_size=config.batch_size) 
 
         diff_top1 = top1_after_ttt - top1_before_ttt
@@ -150,7 +138,7 @@ def run_ttt_improvement(model, tokenizer, dataset, status, optimizer,
     model.load_state_dict(status['model'])
     evaluator = ZeroShotImageNetEvaluator(tokenizer, device, dataset)
     train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory)
-    tttrainer = TestTimeTrainer(train_loader, optimizer, mask_ratio, device)
+    tttrainer = TestTimeTrainer(train_loader, optimizer, device)
 
     # [NOTE]: STEP1: Evaluation of initial model before TTT.
     before_ttt = evaluator(model.clip)

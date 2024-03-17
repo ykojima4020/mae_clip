@@ -13,7 +13,7 @@ class Evaluator():
 
 class ZeroShotImageNetEvaluator(Evaluator):
 
-    def __init__(self, tokenizer, device, dataset):
+    def __init__(self, tokenizer, device, dataset, batch_size=32, num_workers=2):
         self._tokenizer = tokenizer
         self._imagenet_classes = imagenet_config.imagenet_classes
         self._imagenet_templates = imagenet_config.imagenet_templates
@@ -21,7 +21,7 @@ class ZeroShotImageNetEvaluator(Evaluator):
         if not isinstance(dataset, torch.utils.data.Dataset):
             raise TypeError('{} is not supported.'.format(type(dataset)))
 
-        self._loader = torch.utils.data.DataLoader(dataset, batch_size=32, num_workers=2)
+        self._loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
         self._device = device
         self._zeroshot_weights = None
 

@@ -9,10 +9,11 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
 import open_clip
+from imagenetv2_pytorch import ImageNetV2Dataset
 
 from omegaconf import OmegaConf, read_write
 
-from factory import RILSMAECLIPFactory, PretrainedOpenCLIPFactory
+from factory import RILSMAECLIPFactory, PretrainedOpenCLIPFactory, PretrainedOpenCLIPDecoderFineTuneFactory, PretrainedOpenCLIPDecoderEncoderFineTuneFactory 
 from data.dataloader_builder import CLIPDataLoaderBuilder, GCC3MDataLoaderBuilder
 from trainer.trainer import SimpleTrainer
 from trainer.validater import SimpleValidater
@@ -28,7 +29,7 @@ from misc.optimizer import build_optimizer
 def get_args_parser():
     parser = argparse.ArgumentParser('CLIP pre-training', add_help=False)
     parser.add_argument('--cfg', type=str, required=True, help='path to a config file')
-    parser.add_argument('--type', default='normal', choices=['normal', 'open'], help='a kind of archtectures')
+    parser.add_argument('--type', default='open', choices=['normal', 'open'], help='a kind of archtectures')
     parser.add_argument('--opts', help="Modify config options by adding 'KEY=VALUE' list. ", default=None, nargs='+')
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--wandb', action='store_true')
@@ -70,21 +71,20 @@ def main(rank, world_size, cfg):
     if cfg.type == 'normal':
         factory = RILSMAECLIPFactory(cfg.model)
     elif cfg.type == 'open':
-        factory = PretrainedOpenCLIPFactory(cfg.model)
+        # factory = PretrainedOpenCLIPFactory(cfg.model)
+        # factory = PretrainedOpenCLIPDecoderFineTuneFactory(cfg.model, mae='feature')
+        factory = PretrainedOpenCLIPDecoderEncoderFineTuneFactory(cfg.model, mae='feature')
     else:
         raise TypeError
 
     model, tokenizer, transform = factory.create()
     model = model.to(rank)
 
-    for name, param in model.named_parameters():
-        if 'decoder' in name:
-            param.requires_grad = True
-        else:
-            param.requires_grad = False
-        print(name, param.requires_grad)
+    if dist.get_rank() == 0:
+        for name, param in model.named_parameters():
+            print(name, param.requires_grad)
 
-    ddp_model = DDP(model, device_ids=[rank])
+    ddp_model = DDP(model, device_ids=[rank], find_unused_parameters=True)
     model_without_ddp = ddp_model.module
 
     dataloader_builder = CLIPDataLoaderBuilder(cfg.data, tokenizer, transform)
@@ -101,7 +101,8 @@ def main(rank, world_size, cfg):
     trainer = SimpleTrainer(train_loader, optimizer, lr_scheduler, cfg.train.clip_grad, rank)
     validater = SimpleValidater(val_loader, optimizer, rank)
     if dist.get_rank() == 0:
-        evaluator = ZeroShotImageNetEvaluator(tokenizer, rank)
+        dataset = ImageNetV2Dataset(transform=transform('valid')) 
+        evaluator = ZeroShotImageNetEvaluator(tokenizer, rank, dataset)
 
 
     if cfg.checkpoint.auto_resume:
@@ -164,9 +165,6 @@ def main(rank, world_size, cfg):
             wandb.log(stats)
             wandb.log({'image': table})
         dist.barrier()
-
-    if cfg.wandb and dist.get_rank() == 0:
-        run.finish()
 
     cleanup()
 
